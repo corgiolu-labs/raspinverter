@@ -19,12 +19,8 @@ logger = logging.getLogger(__name__)
 def register_inverter_routes(app: Flask) -> None:
     @app.route("/api/inverter")
     def inverter():
-        try:
-            with db() as con:
-                row = con.execute("SELECT * FROM samples ORDER BY id DESC LIMIT 1").fetchone()
-        except Exception as e:
-            logger.warning("inverter: DB read latest sample failed: %s", e)
-            row = None
+        with db() as con:
+            row = con.execute("SELECT * FROM samples ORDER BY id DESC LIMIT 1").fetchone()
         db_sample = dict(row) if row else None
         mem_sample = poll_state.last_sample
         i2c_snapshot = i2c_service.LAST_I2C
