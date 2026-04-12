@@ -4,9 +4,16 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
-import tests._path_setup  # noqa: F401 — imposta INVERTER_DB_PATH prima degli import backend
+import tests._path_setup  # noqa: F401 — DB + config temporanei prima degli import backend
 
 _client: Any = None
+
+
+def reset_runtime_conf_from_disk() -> None:
+    """Risincronizza `CONF` con il contenuto di `CONFIG_PATH` (file di test o produzione)."""
+    from config import reload_runtime_config
+
+    reload_runtime_config()
 
 
 def get_test_client():

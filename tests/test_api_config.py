@@ -4,10 +4,14 @@ from __future__ import annotations
 
 import unittest
 
-from tests.helpers import get_test_client
+from tests.helpers import get_test_client, reset_runtime_conf_from_disk
 
 
 class TestApiConfig(unittest.TestCase):
+    def tearDown(self) -> None:
+        # Ripristina CONF dal file di config di test (POST senza persist non aggiorna il file).
+        reset_runtime_conf_from_disk()
+
     def test_config_get_200_and_keys(self):
         c = get_test_client()
         r = c.get("/api/config")

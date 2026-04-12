@@ -63,9 +63,9 @@ python -m unittest discover -s tests -p "test_*.py" -v
 - **Config:** `validate_config` con payload valido e due casi invalidi.
 - **Energia:** unità, finestra temporale, riempimento minuti.
 - **Inverter (service):** payload con mock di `_fetch_battery_net_wh`.
-- **API (Flask test client):** `test_api_*.py` — health, test, config GET/POST, inverter, history, energy hour, totals/today; DB isolato via `INVERTER_DB_PATH` temporaneo impostato in `tests/_path_setup.py`.
+- **API (Flask test client):** `test_api_*.py` — health, test, config GET/POST, inverter, history, energy hour, totals/today; in `tests/_path_setup.py` sono impostati `INVERTER_DB_PATH` e `INVERTER_CONFIG_PATH` su file temporanei. Dopo i POST config, `reload_runtime_config()` in `tearDown` ripulisce `CONF` rispetto al JSON di test.
 
-Non coprono hardware, thread di polling, integrazione seriale/GPIO né tutte le route HTTP.
+Non coprono hardware, thread di polling, integrazione seriale/GPIO né tutte le route HTTP. I parametri Modbus/I2C derivati al primo import di `config` non si aggiornano se si richiama solo `reload_runtime_config()` (accettato per i test attuali).
 
 ## Deploy
 

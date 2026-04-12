@@ -76,9 +76,13 @@ Dalla **radice del repository** (nessun hardware richiesto; usano `unittest` del
 python -m unittest discover -s tests -p "test_*.py" -v
 ```
 
-**Database nei test:** `tests/_path_setup.py` imposta automaticamente `INVERTER_DB_PATH` su un file SQLite **temporaneo** (cancellato in uscita), così la suite **non usa** `data/inverter_history.db` del repo. Per forzare il DB di produzione durante il debug (sconsigliato): `RASPINVERTER_USE_PRODUCTION_DB=1`.
+**Isolamento nei test:** `tests/_path_setup.py` imposta automaticamente:
+- `INVERTER_DB_PATH` → SQLite **temporaneo** (non si usa `data/inverter_history.db` del repo). Opt-out: `RASPINVERTER_USE_PRODUCTION_DB=1`.
+- `INVERTER_CONFIG_PATH` → JSON **temporaneo** (`{}` iniziale; non si legge/scrive `config/inverter_config.json` reale). Opt-out: `RASPINVERTER_USE_PRODUCTION_CONFIG=1`.
 
-**Override runtime (produzione/custom):** variabile opzionale `INVERTER_DB_PATH` (path assoluto al file `.db`) letta da `config.py` — utile anche fuori dai test.
+Dopo i POST su `/api/config` nei test, `reload_runtime_config()` (chiamato in `tearDown` di `TestApiConfig`) risincronizza il dizionario globale `CONF` dal file temporaneo, riducendo effetti collaterali tra metodi.
+
+**Override runtime (produzione/custom):** `INVERTER_DB_PATH` e `INVERTER_CONFIG_PATH` (path assoluti consigliati) sono letti da `config.py` solo se impostati; altrimenti restano i default (`data/` e `config/inverter_config.json`).
 
 **Cosa è coperto:** smoke `create_app()`; validazione config; helper energia/inverter; **test API** con Flask `test_client()` su `/api/health`, `/api/test`, `/api/config` (GET/POST valido/invalido), `/api/inverter`, `/api/history`, `/api/energy?granularity=hour`, `/api/totals/today` (status code e chiavi JSON essenziali; dati di prova inseriti nel DB temporaneo).
 

@@ -35,7 +35,11 @@ def _load_json(path) -> dict:
 
 
 def _resolve_config_path() -> Path:
-    raw = Path(os.getenv("INVERTER_CONFIG", CFG_DIR / "inverter_config.json"))
+    """Path del JSON di configurazione: priorità INVERTER_CONFIG_PATH, poi INVERTER_CONFIG, poi default repo."""
+    path_explicit = os.getenv("INVERTER_CONFIG_PATH", "").strip()
+    if path_explicit:
+        return Path(path_explicit).expanduser().resolve()
+    raw = Path(os.getenv("INVERTER_CONFIG", str(CFG_DIR / "inverter_config.json")))
     if not raw.exists():
         try:
             CFG_DIR.mkdir(parents=True, exist_ok=True)
@@ -49,28 +53,67 @@ def _resolve_config_path() -> Path:
     return raw
 
 
-CONFIG_PATH = _resolve_config_path()
+CONF: Dict[str, Any] = {}
 
-CONF: Dict[str, Any] = _load_json(CONFIG_PATH)
-logger.info("Loaded config from %s keys=%s", CONFIG_PATH, list(CONF.keys()))
-if "i2c" in CONF:
-    try:
-        devices = CONF.get("i2c", {}).get("devices", [])
-        logger.info(
-            "I2C enabled=%s devices=%s",
-            CONF.get("i2c", {}).get("enabled"),
-            len(devices),
-        )
-    except Exception as e:
-        logger.warning("Error inspecting i2c config: %s", e)
 
-if "relay" in CONF:
+def _strip_relay_webhooks() -> None:
+    if "relay" not in CONF:
+        return
     if "webhook_on" in CONF["relay"]:
         del CONF["relay"]["webhook_on"]
         logger.info("Removed obsolete webhook_on from relay config")
     if "webhook_off" in CONF["relay"]:
         del CONF["relay"]["webhook_off"]
         logger.info("Removed obsolete webhook_off from relay config")
+
+
+def _apply_loaded_conf(raw: Dict[str, Any]) -> None:
+    """Aggiorna il dizionario globale CONF da un dict JSON (stesso effetto del bootstrap iniziale)."""
+    CONF.clear()
+    CONF.update(raw if isinstance(raw, dict) else {})
+    _strip_relay_webhooks()
+    CONF.setdefault(
+        "relay",
+        {
+            "mode": "gpio",
+            "enabled": False,
+            "gpio_pin": 17,
+            "active_high": True,
+            "on_v": 47.5,
+            "off_v": 49.0,
+            "min_toggle_sec": 5,
+        },
+    )
+
+
+def _log_config_loaded() -> None:
+    logger.info("Loaded config from %s keys=%s", CONFIG_PATH, list(CONF.keys()))
+    if "i2c" in CONF:
+        try:
+            devices = CONF.get("i2c", {}).get("devices", [])
+            logger.info(
+                "I2C enabled=%s devices=%s",
+                CONF.get("i2c", {}).get("enabled"),
+                len(devices),
+            )
+        except Exception as e:
+            logger.warning("Error inspecting i2c config: %s", e)
+
+
+CONFIG_PATH = _resolve_config_path()
+_apply_loaded_conf(_load_json(CONFIG_PATH))
+_log_config_loaded()
+
+
+def reload_runtime_config() -> None:
+    """
+    Rilegge CONFIG_PATH e riscrive CONF (webhook legacy + default relay come all'avvio).
+
+    Utile nei test dopo POST /api/config senza `persist`, o per ripristinare lo stato da disco.
+    Non ricalcola MB_* / POLL_S / I2C_* derivati all'import: restano i valori del primo caricamento modulo.
+    """
+    _apply_loaded_conf(_load_json(CONFIG_PATH))
+    _log_config_loaded()
 
 
 def _get(path: str, default=None):
@@ -114,19 +157,6 @@ DEFAULT_NET_RESET_V = 46.0
 I2C_ENABLED: bool = ev("I2C_ENABLED", "i2c.enabled", False, bool)
 I2C_BUS: int = ev("I2C_BUS", "i2c.bus", 1, int)
 I2C_DEVICES = _get("i2c.devices", []) or []
-
-CONF.setdefault(
-    "relay",
-    {
-        "mode": "gpio",
-        "enabled": False,
-        "gpio_pin": 17,
-        "active_high": True,
-        "on_v": 47.5,
-        "off_v": 49.0,
-        "min_toggle_sec": 5,
-    },
-)
 
 
 def validate_config(data: dict) -> Tuple[bool, str]:

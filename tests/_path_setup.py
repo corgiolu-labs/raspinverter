@@ -1,11 +1,13 @@
-"""Path backend + (opzionale) DB SQLite isolato per la suite unittest.
+"""Path backend + isolamento DB e config per la suite unittest.
 
-Senza `RASPINVERTER_USE_PRODUCTION_DB=1`, imposta `INVERTER_DB_PATH` su un file
-temporaneo così i test non leggono/scrivono `data/inverter_history.db` del repo.
+- Senza `RASPINVERTER_USE_PRODUCTION_DB=1`: `INVERTER_DB_PATH` → file SQLite temporaneo.
+- Senza `RASPINVERTER_USE_PRODUCTION_CONFIG=1`: `INVERTER_CONFIG_PATH` → JSON temporaneo minimale (`{}`),
+  così non si legge/scrive `config/inverter_config.json` del repo.
 """
 from __future__ import annotations
 
 import atexit
+import json
 import os
 import sys
 import tempfile
@@ -31,3 +33,19 @@ if not _use_prod_db and "INVERTER_DB_PATH" not in os.environ:
                 pass
 
     atexit.register(_cleanup_test_db)
+
+_use_prod_cfg = os.getenv("RASPINVERTER_USE_PRODUCTION_CONFIG", "").lower() in ("1", "true", "yes")
+if not _use_prod_cfg and "INVERTER_CONFIG_PATH" not in os.environ:
+    _cfg_fd, _TEST_CFG = tempfile.mkstemp(prefix="raspinv_test_", suffix=".json")
+    os.close(_cfg_fd)
+    with open(_TEST_CFG, "w", encoding="utf-8") as f:
+        json.dump({}, f)
+    os.environ["INVERTER_CONFIG_PATH"] = _TEST_CFG
+
+    def _cleanup_test_cfg() -> None:
+        try:
+            os.remove(_TEST_CFG)
+        except OSError:
+            pass
+
+    atexit.register(_cleanup_test_cfg)
