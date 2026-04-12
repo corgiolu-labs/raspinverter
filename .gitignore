@@ -1,0 +1,44 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+.eggs/
+dist/
+build/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+
+# Local configuration (copy from inverter_config.example.json)
+config/inverter_config.json
+
+# Logs and temp
+*.log
+*.tmp
+*.bak
+*.swp
+*~
+
+# Local data (SQLite, WAL)
+data/*.db
+data/*.db-shm
+data/*.db-wal
+
+# Generated graphs (optional utility output)
+graphs/
+
+# IDE / OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
