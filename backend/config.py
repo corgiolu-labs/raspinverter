@@ -16,7 +16,12 @@ REPO_ROOT = _BACKEND_DIR.parent
 WEB_DIR = _BACKEND_DIR / "web"
 CFG_DIR = REPO_ROOT / "config"
 DATA_DIR = REPO_ROOT / "data"
-DB_PATH = DATA_DIR / "inverter_history.db"
+# SQLite path: default sotto data/; override con env per test o installazioni custom (path assoluto consigliato).
+_db_path_env = os.getenv("INVERTER_DB_PATH", "").strip()
+if _db_path_env:
+    DB_PATH = Path(_db_path_env).expanduser().resolve()
+else:
+    DB_PATH = DATA_DIR / "inverter_history.db"
 
 PORT = int(os.getenv("PORT", "8000"))
 

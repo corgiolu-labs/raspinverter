@@ -76,9 +76,13 @@ Dalla **radice del repository** (nessun hardware richiesto; usano `unittest` del
 python -m unittest discover -s tests -p "test_*.py" -v
 ```
 
-**Cosa è coperto:** smoke `create_app()`, validazione config (`validate_config`), helper energia/finestre temporali, costruzione payload inverter con dati fittizi (DB reale per `battery_net_wh` mockato nei test).
+**Database nei test:** `tests/_path_setup.py` imposta automaticamente `INVERTER_DB_PATH` su un file SQLite **temporaneo** (cancellato in uscita), così la suite **non usa** `data/inverter_history.db` del repo. Per forzare il DB di produzione durante il debug (sconsigliato): `RASPINVERTER_USE_PRODUCTION_DB=1`.
 
-**Cosa non è coperto:** accesso seriale Modbus, GPIO, I2C reale, polling in thread, contenuto reale del database di produzione.
+**Override runtime (produzione/custom):** variabile opzionale `INVERTER_DB_PATH` (path assoluto al file `.db`) letta da `config.py` — utile anche fuori dai test.
+
+**Cosa è coperto:** smoke `create_app()`; validazione config; helper energia/inverter; **test API** con Flask `test_client()` su `/api/health`, `/api/test`, `/api/config` (GET/POST valido/invalido), `/api/inverter`, `/api/history`, `/api/energy?granularity=hour`, `/api/totals/today` (status code e chiavi JSON essenziali; dati di prova inseriti nel DB temporaneo).
+
+**Cosa non è coperto:** seriale Modbus, GPIO, I2C reale, polling in thread, browser/e2e, CI complessa; i test API non esercitano tutte le route (es. relay, analisi, maintenance).
 
 `requirements-dev.txt` è opzionale (i test non aggiungono dipendenze obbligatorie oltre `requirements.txt`).
 
@@ -172,7 +176,7 @@ RASPINVERTER/
 ├── backend/           # Flask app factory, route, servizi, web statico
 ├── src/               # Logica condivisa (es. daily_analyzer)
 ├── scripts/           # Utility, run_backend.py, test seriale / grafici
-├── tests/             # unittest (smoke app, config, energia, inverter payload)
+├── tests/             # unittest, test API Flask, helpers.py, DB temp via _path_setup
 ├── deploy/            # es. raspinverter.service.example (systemd)
 ├── config/            # inverter_config.example.json (template); inverter_config.json locale (ignorato)
 ├── data/              # Database SQLite (generato in esecuzione; non versionare .db)

@@ -62,9 +62,10 @@ python -m unittest discover -s tests -p "test_*.py" -v
 - **Smoke:** `create_app()` e presenza route note.
 - **Config:** `validate_config` con payload valido e due casi invalidi.
 - **Energia:** unità, finestra temporale, riempimento minuti.
-- **Inverter:** payload con mock di `_fetch_battery_net_wh` (nessun DB reale richiesto per quel valore).
+- **Inverter (service):** payload con mock di `_fetch_battery_net_wh`.
+- **API (Flask test client):** `test_api_*.py` — health, test, config GET/POST, inverter, history, energy hour, totals/today; DB isolato via `INVERTER_DB_PATH` temporaneo impostato in `tests/_path_setup.py`.
 
-Non coprono hardware, thread di polling né integrazione seriale/GPIO.
+Non coprono hardware, thread di polling, integrazione seriale/GPIO né tutte le route HTTP.
 
 ## Deploy
 
