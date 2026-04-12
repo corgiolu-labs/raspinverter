@@ -29,7 +29,7 @@ except Exception:
     except Exception:  # pragma: no cover
         ModbusSerialClient = None  # type: ignore
 
-# Mappa registri (allineata a backend/inverter_api.py)
+# Mappa registri (allineata a backend/models/register_map.py)
 # (nome, indirizzo, scala)
 REGS: Tuple[Tuple[str, int, float], ...] = (
     ("battery_a", 216, 0.1),

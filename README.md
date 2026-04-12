@@ -22,15 +22,51 @@ Il sistema interroga l’inverter in **holding registers** Modbus, applica scale
 Inverter  --[RS-232 / UART Modbus RTU]-->  Raspberry Pi
                                               |
                                               v
-                                    backend/inverter_api.py
-                                    (poll + SQLite + API)
+                         backend/inverter_api.py  (entrypoint)
+                         poll thread: Modbus + I2C -> SQLite
+                         Flask: backend/app.py + routes/api_routes.py
                                               |
                                               v
                                     browser  -->  backend/web/*
 ```
 
-- Il **Pi** esegue il servizio Python, apre la porta seriale configurata e scrive i campioni in `data/inverter_history.db` (creata al primo avvio).
-- Il **client** (browser sulla LAN o in locale) usa le route Flask per HTML/JS statici e le route `/api/*` per JSON.
+- Il **Pi** esegue il servizio Python: il **thread di polling** legge Modbus (e opzionalmente I2C) e persiste in `data/inverter_history.db`; **Flask** espone le stesse API e gli asset statici di prima.
+- Il backend è stato **suddiviso in moduli** (`config`, `db`, `services`, `routes`, `models`) mantenendo **compatibilità di avvio** da `backend/inverter_api.py` e lo stesso file di configurazione JSON. Dettaglio moduli: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+
+## Project structure (backend)
+
+```text
+backend/
+  __init__.py
+  inverter_api.py    # entrypoint: sys.path, db_init, relay, poll_loop, app.run
+  app.py             # create_app(), Compress, after_request, register_routes
+  config.py          # path, JSON config, env override seriale/polling/I2C
+  db.py              # SQLite: connessione, schema, trim/archivio
+  poll_state.py      # stato condiviso poll thread <-> API (ultimo campione, lock, stop)
+  routes/
+    api_routes.py    # route statiche + /api/*
+  services/
+    modbus_service.py
+    i2c_service.py
+    relay_service.py
+    battery_service.py
+  models/
+    register_map.py  # REGS / signed / blocchi lettura Modbus
+  web/               # frontend statico (invariato)
+```
+
+## Development notes
+
+- Avvio locale dalla **radice del repo**: `python backend/inverter_api.py` (così `config/` e `data/` restano allineati al layout attuale).
+- Variabili d’ambiente opzionali: vedi `.env.example` (solo esempi non sensibili; stessi nomi già supportati da `config.py`).
+- Per modificare la **mappa Modbus**, intervenire su `backend/models/register_map.py` (non più nel monolite `inverter_api.py`).
+- Logging: `logging` è usato nei moduli nuovi e nei punti toccati; non è stata fatta una migrazione completa di ogni `print` storico.
+
+## Production notes
+
+- Eseguire il servizio con working directory coerente con il repo (o path assoluti in `INVERTER_CONFIG` se necessario).
+- `threaded=True` su Flask è mantenuto come in precedenza.
+- Database: stesso file SQLite sotto `data/`; schema invariato — backup periodico consigliato in produzione.
 
 ## Requisiti
 
@@ -96,19 +132,20 @@ Genera immagini sotto `graphs/` (cartella ignorata da git).
 ## Avvertenze
 
 - **Hardware e sicurezza**: lavorare su tensioni e connessioni dell’inverter solo con competenza; questo software non sostituisce manuali o normative.
-- **Compatibilità inverter**: registri e scale sono **specifici del dispositivo** usato nello sviluppo; riuso su altri modelli richiede verifica e possibili modifiche alla mappa in `backend/inverter_api.py`.
+- **Compatibilità inverter**: registri e scale sono **specifici del dispositivo** usato nello sviluppo; riuso su altri modelli richiede verifica e possibili modifiche alla mappa in `backend/models/register_map.py`.
 - **Reverse engineering**: il progetto assume una conoscenza sperimentale del protocollo; non è un prodotto certificato dal costruttore.
 
 ## Struttura repository
 
 ```text
 RASPINVERTER/
-├── backend/           # Flask, API, frontend statico (web/)
+├── backend/           # Flask app factory, route, servizi, web statico
 ├── src/               # Logica condivisa (es. daily_analyzer)
 ├── scripts/           # Utility e test seriale / grafici
 ├── config/            # inverter_config.example.json (template); inverter_config.json locale (ignorato)
 ├── data/              # Database SQLite (generato in esecuzione; non versionare .db)
-├── docs/              # Appunti / diagrammi (opzionale)
+├── docs/              # ARCHITECTURE.md e altri appunti
+├── .env.example       # Esempi variabili d'ambiente (non sensibili)
 ├── requirements.txt
 ├── README.md
 └── .gitignore
