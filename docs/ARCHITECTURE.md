@@ -12,6 +12,7 @@ Panoramica dei moduli sotto `backend/`: stesso runtime Flask/SQLite e stessi pat
 | Config / persistenza | `config.py`, `db.py` | JSON, env, SQLite. |
 | Dominio Modbus | `models/register_map.py` | Tabella registri. |
 | Servizi | `services/*` | Modbus, I2C, relay, batteria. |
+| Query / applicativo | `inverter_query_service.py`, `energy_query_service.py`, `config_service.py` | Logica di composizione JSON per route principali (senza Flask `request` dove possibile). |
 | Stato runtime | `poll_state.py`, `*_service.LAST_*` | Campione in memoria, stop/lock; ultimo esito Modbus e snapshot I2C restano nei servizi (scelta esplicita, senza DI). |
 | HTTP | `routes/*` | Route divise per area; `api_routes.py` solo orchestratore. |
 
@@ -38,6 +39,38 @@ Ogni file espone `register_<area>_routes(app: Flask) -> None`. L’ordine di reg
 | `relay_routes.py` | `/api/relay/*` |
 | `api_routes.py` | Istanza `DailyAnalyzer` e chiamate sequenziali ai `register_*` sopra. |
 
+## Service layer (query / config)
+
+Funzioni pure o quasi-pure che riducono la logica nelle route:
+
+| Modulo | Contenuto |
+|--------|-----------|
+| `inverter_query_service.py` | Scelta campione DB vs memoria, SOC %, `stale_seconds`, relay, I2C, `battery_net_wh` (seconda query), campi `last_ok` / `last_error`. |
+| `energy_query_service.py` | `normalize_energy_unit`, `parse_energy_window`, serie minuti storico, merge campioni+archivio, bucket hour/day/month/year, payload totali giornalieri. |
+| `config_service.py` | `build_config_get_payload`, `merge_config_from_post`, `finalize_config_persist` (webhook legacy, scrittura file, `relay_setup`). |
+
+Le route in `inverter_routes.py`, `energy_routes.py`, `config_routes.py` si limitano a I/O HTTP/SQL e chiamano questi servizi.
+
+## Test (`tests/`)
+
+Esecuzione dalla root del repo:
+
+```bash
+python -m unittest discover -s tests -p "test_*.py" -v
+```
+
+- **Smoke:** `create_app()` e presenza route note.
+- **Config:** `validate_config` con payload valido e due casi invalidi.
+- **Energia:** unità, finestra temporale, riempimento minuti.
+- **Inverter:** payload con mock di `_fetch_battery_net_wh` (nessun DB reale richiesto per quel valore).
+
+Non coprono hardware, thread di polling né integrazione seriale/GPIO.
+
+## Deploy
+
+- `scripts/run_backend.py` — CWD = root repo, import di `inverter_api.main()`.
+- `deploy/raspinverter.service.example` — unit systemd da adattare (utente, path, venv).
+
 ## Moduli di servizio (riepilogo)
 
 | Modulo | Ruolo |
@@ -60,3 +93,4 @@ Ogni file espone `register_<area>_routes(app: Flask) -> None`. L’ordine di reg
 - **Stato “ultima lettura”** distribuito: `poll_state.last_sample` vs `modbus_service.LAST_*` vs `i2c_service.LAST_I2C` — documentato in `poll_state.py`; unificare solo se serve un refactor più ampio.
 - **Nessun Blueprint Flask** in questa fase: registrazione diretta su `app` per massima parità col comportamento precedente.
 - **Silent `except` residui** possono esistere in servizi non toccati o in percorsi rari; la Phase 2 ha concentrato logging su poll loop, route critiche e DB mkdir.
+- **SQL ancora nelle route** per `/api/history`, `/api/energy`, `/api/totals/today`: solo la parte di aggregazione/composizione risposta è nel service layer; spostare anche le query richiederebbe un refactor più ampio.

@@ -1,0 +1,34 @@
+# Esempio unit systemd per RASPINVERTER (personalizzare percorsi e utente).
+#
+# Installazione tipica:
+#   sudo cp deploy/raspinverter.service.example /etc/systemd/system/raspinverter.service
+#   sudo nano /etc/systemd/system/raspinverter.service   # adatta WorkingDirectory e User
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now raspinverter.service
+#
+# Note:
+# - Non inserire segreti in questo file; usa EnvironmentFile=-/etc/raspinverter.env se serve.
+# - L'entrypoint si aspetta la root del repo come CWD (config/, data/).
+
+[Unit]
+Description=RASPINVERTER Flask backend (Modbus + SQLite)
+After=network.target
+
+[Service]
+Type=simple
+# TODO: utente non-root dedicato (es. pi o raspinverter)
+User=pi
+Group=pi
+# TODO: percorso assoluto alla radice del clone git
+WorkingDirectory=/home/pi/raspinverter
+# Usa lo stesso interprete del venv se presente
+ExecStart=/home/pi/raspinverter/.venv/bin/python scripts/run_backend.py
+Restart=on-failure
+RestartSec=5
+
+# Opzionale: variabili ambiente (PORT, INVERTER_CONFIG, seriale, ecc.)
+# Environment=PORT=8000
+# EnvironmentFile=-/etc/raspinverter.env
+
+[Install]
+WantedBy=multi-user.target

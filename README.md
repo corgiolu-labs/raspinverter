@@ -60,14 +60,31 @@ backend/
     i2c_service.py
     relay_service.py
     battery_service.py
+    inverter_query_service.py   # payload /api/inverter
+    energy_query_service.py     # finestre e aggregazioni energia/storico
+    config_service.py           # merge/persist config da POST /api/config
   models/
     register_map.py  # REGS / signed / blocchi lettura Modbus
   web/               # frontend statico (invariato)
 ```
 
+## Test automatici
+
+Dalla **radice del repository** (nessun hardware richiesto; usano `unittest` della standard library):
+
+```bash
+python -m unittest discover -s tests -p "test_*.py" -v
+```
+
+**Cosa è coperto:** smoke `create_app()`, validazione config (`validate_config`), helper energia/finestre temporali, costruzione payload inverter con dati fittizi (DB reale per `battery_net_wh` mockato nei test).
+
+**Cosa non è coperto:** accesso seriale Modbus, GPIO, I2C reale, polling in thread, contenuto reale del database di produzione.
+
+`requirements-dev.txt` è opzionale (i test non aggiungono dipendenze obbligatorie oltre `requirements.txt`).
+
 ## Development notes
 
-- Avvio locale dalla **radice del repo**: `python backend/inverter_api.py` (così `config/` e `data/` restano allineati al layout attuale).
+- Avvio locale dalla **radice del repo**: `python backend/inverter_api.py` oppure `python scripts/run_backend.py` (imposta CWD sulla root del repo e avvia lo stesso entrypoint).
 - Variabili d’ambiente opzionali: vedi `.env.example` (solo esempi non sensibili; stessi nomi già supportati da `config.py`).
 - Per modificare la **mappa Modbus**, intervenire su `backend/models/register_map.py` (non più nel monolite `inverter_api.py`).
 - Logging: `logging` per modulo (`logging.getLogger(__name__)`); messaggi di startup in `inverter_api` / `app` / `routes.api_routes`. Nei loop di polling gli errori non bloccanti usano soprattutto `logger.debug` per evitare rumore.
@@ -76,13 +93,15 @@ backend/
 ## Production notes
 
 - Eseguire il servizio con working directory coerente con il repo (o path assoluti in `INVERTER_CONFIG` se necessario).
+- Esempio **systemd**: `deploy/raspinverter.service.example` — copiare in `/etc/systemd/system/`, personalizzare `User`, `WorkingDirectory` e `ExecStart` (venv), poi `systemctl enable --now`.
 - `threaded=True` su Flask è mantenuto come in precedenza.
 - Database: stesso file SQLite sotto `data/`; schema invariato — backup periodico consigliato in produzione.
 
 ## Requisiti
 
 - Python 3.10+ consigliato.
-- Dipendenze principali: vedere `requirements.txt` (Flask, pymodbus, pyserial; opzionali smbus2/GPIO su Pi).
+- Dipendenze runtime: `requirements.txt` (Flask, pymodbus, pyserial; opzionali smbus2/GPIO su Pi).
+- Opzionale sviluppo: `requirements-dev.txt` (solo note; i test usano `unittest` incluso in Python).
 
 ## Configuration
 
@@ -152,12 +171,15 @@ Genera immagini sotto `graphs/` (cartella ignorata da git).
 RASPINVERTER/
 ├── backend/           # Flask app factory, route, servizi, web statico
 ├── src/               # Logica condivisa (es. daily_analyzer)
-├── scripts/           # Utility e test seriale / grafici
+├── scripts/           # Utility, run_backend.py, test seriale / grafici
+├── tests/             # unittest (smoke app, config, energia, inverter payload)
+├── deploy/            # es. raspinverter.service.example (systemd)
 ├── config/            # inverter_config.example.json (template); inverter_config.json locale (ignorato)
 ├── data/              # Database SQLite (generato in esecuzione; non versionare .db)
 ├── docs/              # ARCHITECTURE.md e altri appunti
 ├── .env.example       # Esempi variabili d'ambiente (non sensibili)
 ├── requirements.txt
+├── requirements-dev.txt
 ├── README.md
 └── .gitignore
 ```
