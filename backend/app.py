@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import logging
-import sys
-from pathlib import Path
 
 from flask import Flask, request
+
+from import_paths import ensure_src_path
 
 try:
     from flask_compress import Compress
@@ -19,13 +19,9 @@ logger = logging.getLogger(__name__)
 
 
 def create_app() -> Flask:
-    # Stesso path dell'entrypoint: modulo daily_analyzer in repo src/
-    _backend = Path(__file__).resolve().parent
-    _src = _backend.parent / "src"
-    _s = str(_src)
-    if _s not in sys.path:
-        sys.path.insert(0, _s)
+    ensure_src_path()
 
+    logger.info("Creating Flask application...")
     app = Flask(__name__, static_folder=None)
     if Compress:
         try:
@@ -42,7 +38,8 @@ def create_app() -> Flask:
         """
         try:
             path = request.path or ""
-        except Exception:
+        except Exception as e:
+            logger.debug("after_request: request.path unavailable: %s", e)
             path = ""
 
         if path.startswith("/api/"):
@@ -76,4 +73,5 @@ def create_app() -> Flask:
         return resp
 
     register_routes(app)
+    logger.info("Flask app ready (routes bound)")
     return app

@@ -13,12 +13,12 @@ from pathlib import Path
 from threading import Thread
 
 _BACKEND_DIR = Path(__file__).resolve().parent
-_REPO_ROOT = _BACKEND_DIR.parent
-_SRC_DIR = _REPO_ROOT / "src"
-for _p in (_BACKEND_DIR, _SRC_DIR):
-    _s = str(_p)
-    if _s not in sys.path:
-        sys.path.insert(0, _s)
+if str(_BACKEND_DIR) not in sys.path:
+    sys.path.insert(0, str(_BACKEND_DIR))
+
+from import_paths import ensure_src_path
+
+ensure_src_path()
 
 logging.basicConfig(
     level=logging.INFO,
@@ -50,7 +50,8 @@ def poll_loop() -> None:
                 try:
                     i2c_snapshot = i2c_service.i2c_read_all()
                     i2c_service.LAST_I2C = i2c_snapshot
-                except Exception:
+                except Exception as e:
+                    logger.debug("poll_loop I2C read failed: %s", e)
                     i2c_service.LAST_I2C = None
 
                 if regs:
@@ -65,8 +66,8 @@ def poll_loop() -> None:
                         if (pf is None) or (float(pf or 0.0) <= 0.0):
                             val = (abs(lw) / abs(lva)) if abs(lva) > 1e-6 else None
                             s["load_pf"] = None if val is None else max(0.0, min(1.0, val))
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.debug("poll_loop load_pf derivation skipped: %s", e)
                     poll_state.last_sample = s
 
                     with db() as con:
@@ -117,8 +118,8 @@ def poll_loop() -> None:
                         if "battery_v" in s and s["battery_v"] is not None:
                             batt_v = float(s["battery_v"])
                         relay_auto_step(batt_v)
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.debug("poll_loop relay_auto_step skipped: %s", e)
 
                     try:
                         battery_w = s.get("battery_w")
@@ -139,12 +140,12 @@ def poll_loop() -> None:
                                     (ts_now, json.dumps(i2c_snapshot, ensure_ascii=False)),
                                 )
                                 con.commit()
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            logger.debug("poll_loop I2C-only DB persist failed: %s", e)
                     if poll_state.last_sample is None:
                         poll_state.last_sample = {"timestamp": ts_now}
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("poll_loop iteration outer error: %s", e)
         next_t += POLL_S
         time.sleep(max(0.0, next_t - time.monotonic()))
 
@@ -191,9 +192,11 @@ def main() -> None:
         logger.exception("ERROR setting up signal handlers")
         return
 
+    logger.info("Building Flask application (create_app)...")
     app = create_app()
+    logger.info("Flask app built successfully")
     try:
-        logger.info("Starting Flask app on %s...", PORT)
+        logger.info("Starting Flask app.run (host=0.0.0.0 port=%s threaded=True)...", PORT)
         app.run(host="0.0.0.0", port=PORT, threaded=True, use_reloader=False)
     except Exception:
         logger.exception("ERROR starting Flask")

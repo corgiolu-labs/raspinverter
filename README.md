@@ -24,7 +24,7 @@ Inverter  --[RS-232 / UART Modbus RTU]-->  Raspberry Pi
                                               v
                          backend/inverter_api.py  (entrypoint)
                          poll thread: Modbus + I2C -> SQLite
-                         Flask: backend/app.py + routes/api_routes.py
+                         Flask: backend/app.py + routes/* (api_routes orchestrator)
                                               |
                                               v
                                     browser  -->  backend/web/*
@@ -43,8 +43,18 @@ backend/
   config.py          # path, JSON config, env override seriale/polling/I2C
   db.py              # SQLite: connessione, schema, trim/archivio
   poll_state.py      # stato condiviso poll thread <-> API (ultimo campione, lock, stop)
+  import_paths.py    # aggiunta idempotente di repo src/ (daily_analyzer)
   routes/
-    api_routes.py    # route statiche + /api/*
+    api_routes.py    # orchestratore: chiama register_*_routes sui sotto-moduli
+    static_routes.py
+    health_routes.py
+    analysis_routes.py
+    config_routes.py
+    inverter_routes.py
+    i2c_routes.py
+    energy_routes.py # history, energy, totals/today, maintenance/archive
+    battery_routes.py
+    relay_routes.py
   services/
     modbus_service.py
     i2c_service.py
@@ -60,7 +70,8 @@ backend/
 - Avvio locale dalla **radice del repo**: `python backend/inverter_api.py` (così `config/` e `data/` restano allineati al layout attuale).
 - Variabili d’ambiente opzionali: vedi `.env.example` (solo esempi non sensibili; stessi nomi già supportati da `config.py`).
 - Per modificare la **mappa Modbus**, intervenire su `backend/models/register_map.py` (non più nel monolite `inverter_api.py`).
-- Logging: `logging` è usato nei moduli nuovi e nei punti toccati; non è stata fatta una migrazione completa di ogni `print` storico.
+- Logging: `logging` per modulo (`logging.getLogger(__name__)`); messaggi di startup in `inverter_api` / `app` / `routes.api_routes`. Nei loop di polling gli errori non bloccanti usano soprattutto `logger.debug` per evitare rumore.
+- Path Python: `backend/` viene aggiunto all’avvio da `inverter_api.py`; `import_paths.ensure_src_path()` centralizza l’accesso a `src/` (usato anche da `create_app()`).
 
 ## Production notes
 

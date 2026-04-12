@@ -1,27 +1,62 @@
 # Architettura backend (RASPINVERTER)
 
-Panoramica dei moduli sotto `backend/` dopo il refactor conservativo: stesso runtime Flask/SQLite, stessi path API; il codice è solo organizzato per responsabilità.
+Panoramica dei moduli sotto `backend/`: stesso runtime Flask/SQLite e stessi path API; organizzazione a layer incrementale (Phase 1 + Phase 2).
 
-## Flusso dati
+## Backend layers
 
-1. **`inverter_api.py`** — entrypoint: aggiunge `backend/` e `src/` a `sys.path`, esegue `db_init()`, `relay_setup()`, avvia un thread **daemon** con `poll_loop()`, registra handler segnali/`atexit`, costruisce l’app con `create_app()` e chiama `app.run(threaded=True)`.
-2. **`poll_loop()`** (in `inverter_api.py`) — in ciclo: `modbus_service.read_regs()`, snapshot I2C (`i2c_service`), aggiorna `poll_state.last_sample`, scrive su SQLite (`db`), `relay_auto_step()`, contatori batteria (`battery_service`).
-3. **`app.py`** — `create_app()`: istanza Flask, opzionale Flask-Compress, header cache/charset, `register_routes(app)`.
-4. **`routes/api_routes.py`** — tutte le route HTTP/API e i file statici sotto `web/` (stessi URL di prima).
+| Layer | File / cartella | Responsabilità |
+|-------|-----------------|----------------|
+| Entry | `inverter_api.py` | `sys.path` (directory `backend/`), `import_paths.ensure_src_path()`, `db_init`, relay, thread `poll_loop`, segnali, `create_app()`, `app.run`. |
+| Path | `import_paths.py` | Aggiunta idempotente di `repo/src` per `daily_analyzer` (evita duplicazione con `app.py`). |
+| App factory | `app.py` | `create_app()`, Flask-Compress opzionale, `after_request`, `register_routes(app)`. |
+| Config / persistenza | `config.py`, `db.py` | JSON, env, SQLite. |
+| Dominio Modbus | `models/register_map.py` | Tabella registri. |
+| Servizi | `services/*` | Modbus, I2C, relay, batteria. |
+| Stato runtime | `poll_state.py`, `*_service.LAST_*` | Campione in memoria, stop/lock; ultimo esito Modbus e snapshot I2C restano nei servizi (scelta esplicita, senza DI). |
+| HTTP | `routes/*` | Route divise per area; `api_routes.py` solo orchestratore. |
 
-## Moduli
+## Runtime flow
+
+1. Avvio processo → `inverter_api`: path → import moduli → `db_init()` → `relay_setup()` → thread **daemon** `poll_loop`.
+2. `poll_loop`: sotto lock, `read_regs()` → I2C → aggiornamento `poll_state.last_sample` / `i2c_service.LAST_I2C` → INSERT `samples` / `i2c_snapshots` → `relay_auto_step` → batteria.
+3. In parallelo: `create_app()` → `ensure_src_path()` → Flask + `register_routes(app)` → `app.run(threaded=True)`.
+
+## Route modules
+
+Ogni file espone `register_<area>_routes(app: Flask) -> None`. L’ordine di registrazione è definito in `routes/api_routes.py` (nessun Blueprint; stessi decorator `@app.route` di prima).
+
+| File | Path principali |
+|------|-----------------|
+| `static_routes.py` | `/`, `/settings`, `/analysis`, asset sotto `/web` (CSS/JS/manifest/SW/icons/offline). |
+| `health_routes.py` | `/api/health`, `/api/test` |
+| `analysis_routes.py` | `/api/analysis/*` |
+| `config_routes.py` | `/api/config` |
+| `inverter_routes.py` | `/api/inverter` |
+| `i2c_routes.py` | `/api/i2c/latest`, `/api/i2c/history` |
+| `energy_routes.py` | `/api/history`, `/api/energy`, `/api/totals/today`, `/api/maintenance/archive` |
+| `battery_routes.py` | `/api/battery/*` |
+| `relay_routes.py` | `/api/relay/*` |
+| `api_routes.py` | Istanza `DailyAnalyzer` e chiamate sequenziali ai `register_*` sopra. |
+
+## Moduli di servizio (riepilogo)
 
 | Modulo | Ruolo |
 |--------|--------|
-| `config.py` | Path repo, caricamento JSON, helper `_get`/`ev`, parametri seriale/polling/I2C, `validate_config`. |
-| `db.py` | Connessione SQLite, init schema, trim/archivio, helper timestamp. |
-| `models/register_map.py` | Mappa registri Modbus (`REGS`, signed, blocchi lettura). |
-| `services/modbus_service.py` | Client pymodbus + fallback minimalmodbus, `LAST_OK`/`LAST_ERR`. |
-| `services/i2c_service.py` | Lettura I2C opzionale, `LAST_I2C`. |
-| `services/relay_service.py` | GPIO relay, `relay_apply` / `relay_auto_step`. |
-| `services/battery_service.py` | Contatore energia netta batteria in DB. |
-| `poll_state.py` | `stop_event`, `lock`, `last_sample` condivisi tra poll thread e route. |
+| `config.py` | Path repo, JSON, `validate_config`, override env. |
+| `db.py` | Connessione, schema, archivio/trim. |
+| `models/register_map.py` | `REGS`, signed, blocchi. |
+| `services/modbus_service.py` | pymodbus / minimalmodbus, `LAST_OK` / `LAST_ERR`. |
+| `services/i2c_service.py` | I2C opzionale, `LAST_I2C`. |
+| `services/relay_service.py` | GPIO, `relay_apply`, `relay_auto_step`. |
+| `services/battery_service.py` | Contatori batteria in DB. |
 
 ## Dipendenze esterne
 
-- **`src/daily_analyzer.py`** — importato dentro `register_routes` per gli endpoint di analisi giornaliera (path `src/` aggiunto dall’entrypoint).
+- **`src/daily_analyzer.py`** — importato in `register_routes` (dopo `ensure_src_path()`).
+
+## Technical debt / monolite residuo (intenzionale)
+
+- **`poll_loop`** resta in `inverter_api.py` (orchestrazione breve, basso rischio di regressione).
+- **Stato “ultima lettura”** distribuito: `poll_state.last_sample` vs `modbus_service.LAST_*` vs `i2c_service.LAST_I2C` — documentato in `poll_state.py`; unificare solo se serve un refactor più ampio.
+- **Nessun Blueprint Flask** in questa fase: registrazione diretta su `app` per massima parità col comportamento precedente.
+- **Silent `except` residui** possono esistere in servizi non toccati o in percorsi rari; la Phase 2 ha concentrato logging su poll loop, route critiche e DB mkdir.

@@ -16,8 +16,8 @@ logger = logging.getLogger(__name__)
 def db():
     try:
         DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("db: could not mkdir parent of DB_PATH: %s", e)
     con = sqlite3.connect(str(DB_PATH), timeout=10, check_same_thread=False)
     con.row_factory = sqlite3.Row
     con.execute("PRAGMA journal_mode=WAL;")
