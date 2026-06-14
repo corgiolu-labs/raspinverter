@@ -37,7 +37,7 @@
   "relay": {
     "mode": "gpio",
     "enabled": true,
-    "gpio_pin": 17,
+    "gpio_pin": 22,
     "active_high": true,
     "on_v": 46,
     "off_v": 50.5,
@@ -46,8 +46,8 @@
   "balance": {
     "enabled": false,
     "active_high": true,
-    "gpio_pin_bank1": 23,
-    "gpio_pin_bank2": 24,
+    "gpio_pin_bank1": 17,
+    "gpio_pin_bank2": 27,
     "source_device": "adc_mod2",
     "bank1_channel": "SERIE1",
     "bank2_channel": "SERIE2",
