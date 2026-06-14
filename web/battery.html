@@ -68,18 +68,14 @@
         <h3>⚖️ Bilanciamento banchi</h3>
         <p style="color:var(--muted);font-size:.9rem;margin:.2rem 0 .6rem">
           Commuta un caricatore 24V <strong>isolato</strong> sul banco più scarico (SERIE1/SERIE2) finché si riallineano.
-          <strong>Verifica il cablaggio coi tasti Test prima di attivare l'automatico.</strong>
+          <strong>Verifica il cablaggio coi tasti Test (scheda 🔧 Diagnostica) prima di attivare l'automatico.</strong>
         </p>
         <div id="balInfo" style="margin-bottom:10px;font-size:.9rem;color:var(--muted)">Stato: caricamento…</div>
         <label style="display:flex;align-items:center;gap:8px;margin-bottom:10px;font-size:.9rem;cursor:pointer">
           <input type="checkbox" id="balEnabled" />
           Abilita bilanciamento automatico
         </label>
-        <div style="display:flex;gap:8px;flex-wrap:wrap">
-          <button id="balTest1" class="btn btn--secondary" type="button">🔌 Test relè Banco 1</button>
-          <button id="balTest2" class="btn btn--secondary" type="button">🔌 Test relè Banco 2</button>
-          <button id="balStop" class="btn btn--danger" type="button">⏹ Stop</button>
-        </div>
+        <p style="font-size:.82rem;color:var(--muted);margin:.2rem 0 0">🔌 I test manuali dei relè sono nella scheda <strong>🔧 Diagnostica</strong> (più sicuro: ci si entra apposta).</p>
         <div id="balOut" style="margin-top:10px;font-size:.85rem;color:var(--muted)">—</div>
       </div>
     </section>
@@ -153,10 +149,7 @@
     if(en.checked && !confirm('Abilitare il bilanciamento AUTOMATICO? Verifica che caricatore ISOLATO e cablaggio siano corretti.')){ en.checked=false; return; }
     post({enabled: en.checked}, en.checked?'Abilitazione…':'Disabilitazione…');
   });
-  var b1=document.getElementById('balTest1'), b2=document.getElementById('balTest2'), bs=document.getElementById('balStop');
-  if(b1) b1.addEventListener('click', function(){ if(confirm('TEST: attiva il relè del Banco 1 per 30s (collega il caricatore al banco 1). Procedere?')) post({manual_bank:1, seconds:30}, 'Test Banco 1 (30s)…'); });
-  if(b2) b2.addEventListener('click', function(){ if(confirm('TEST: attiva il relè del Banco 2 per 30s (collega il caricatore al banco 2). Procedere?')) post({manual_bank:2, seconds:30}, 'Test Banco 2 (30s)…'); });
-  if(bs) bs.addEventListener('click', function(){ post({manual_bank:0}, 'Stop…'); });
+  // (Test relè manuali Banco1/Banco2/Stop spostati nella scheda 🔧 Diagnostica)
   refresh(); setInterval(refresh, 5000);
 })();
 </script>

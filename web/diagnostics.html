@@ -31,6 +31,21 @@
       </div>
     </section>
 
+    <!-- Bilanciamento banchi: test relè (spostato dalla scheda Batteria) -->
+    <section class="cards-row">
+      <div class="card">
+        <h3>⚖️ Test relè bilanciamento banchi</h3>
+        <p class="warn">⚠️ Attivano i 2 relè che instradano il caricatore 24V isolato. Banco 1 = relè 0-0 · Banco 2 = relè 1-1.</p>
+        <div id="balDiagInfo" class="diag-row" style="font-size:.85rem;color:var(--muted)">stato: caricamento…</div>
+        <div class="diag-row">
+          <button id="balTest1" class="btn btn--secondary">🔌 Test Banco 1 (0-0)</button>
+          <button id="balTest2" class="btn btn--secondary">🔌 Test Banco 2 (1-1)</button>
+          <button id="balStop" class="btn btn--danger">⏹ Stop</button>
+        </div>
+        <div id="balOut" class="diag-out">—</div>
+      </div>
+    </section>
+
     <!-- Modbus live -->
     <section class="cards-row">
       <div class="card">
@@ -129,6 +144,29 @@
 
     // --- Server ---
     $('ping').addEventListener('click', async () => show('maintOut', (await api('/api/test')).body));
+
+    // --- Test relè bilanciamento banchi (spostato dalla scheda Batteria) ---
+    function balRender(j){
+      const el = $('balDiagInfo'); if (!el) return;
+      if (!j) { el.textContent = 'stato non disponibile'; return; }
+      const bank = j.charging_bank===1 ? 'Banco 1 (0-0)' : (j.charging_bank===2 ? 'Banco 2 (1-1)' : 'nessuno');
+      const s1 = (j.serie1_v!=null) ? Number(j.serie1_v).toFixed(2)+'V' : '—';
+      const s2 = (j.serie2_v!=null) ? Number(j.serie2_v).toFixed(2)+'V' : '—';
+      const d  = (j.diff_v!=null) ? Number(j.diff_v).toFixed(3)+'V' : '—';
+      const extra = (j.manual_test_sec_left>0) ? '  ·  TEST '+j.manual_test_sec_left+'s' : '';
+      el.textContent = 'SERIE1='+s1+'  SERIE2='+s2+'  Δ='+d+'  ·  in carica: '+bank+extra;
+    }
+    function balPost(body, msg){
+      show('balOut', msg || 'invio…');
+      fetch('/api/balance', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) })
+        .then(r => r.json()).then(j => { balRender(j); show('balOut', (j && j.ok) ? 'OK' : 'errore'); })
+        .catch(e => show('balOut', 'errore: ' + e));
+    }
+    function balRefresh(){ fetch('/api/balance').then(r => r.json()).then(balRender).catch(() => {}); }
+    if ($('balTest1')) $('balTest1').addEventListener('click', () => { if (confirm('TEST Banco 1: porta i 2 relè a 0-0 (caricatore sul banco 1) per 30s. Procedere?')) balPost({manual_bank:1, seconds:30}, 'Test Banco 1 (0-0, 30s)…'); });
+    if ($('balTest2')) $('balTest2').addEventListener('click', () => { if (confirm('TEST Banco 2: porta i 2 relè a 1-1 (caricatore sul banco 2) per 30s. Procedere?')) balPost({manual_bank:2, seconds:30}, 'Test Banco 2 (1-1, 30s)…'); });
+    if ($('balStop')) $('balStop').addEventListener('click', () => balPost({manual_bank:0}, 'Stop…'));
+    balRefresh(); setInterval(balRefresh, 5000);
 
     // stato relè iniziale
     doRelay('state');

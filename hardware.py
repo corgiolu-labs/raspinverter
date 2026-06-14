@@ -541,9 +541,12 @@ def relay_setup():
 
 
 # ---------------------------------------------------------------------------
-# Bilanciamento banchi: 2 rele' (GPIO23/24) commutano un caricatore 24V ISOLATO
-# sul banco piu' scarico (SERIE1/SERIE2). Mutua esclusione + break-before-make.
-# Default DISATTIVATO (balance.enabled=false): si abilita dopo aver verificato il cablaggio.
+# Bilanciamento banchi (SCHEMA SPERIMENTALE 2026-06-14): 1 caricatore 24V ISOLATO instradato da
+# 2 rele' SPDT. Cablaggio reale: NC1->neg.banco1, NO1+NC2->cavo serie (M), NO2->pos.banco2.
+# banco1 = ENTRAMBI OFF (0-0), banco2 = ENTRAMBI ON (1-1) (vedi balance_set). Lo stato misto '0-1'
+# (relay1 OFF / relay2 ON) mette 48V sul caricatore = VIETATO; lo stato '1-0' (corto) e' innocuo su
+# caricatore CC. L'ordine di commutazione fa passare il transitorio SEMPRE per '1-0' e MAI per '0-1'.
+# Default DISATTIVATO (balance.enabled=false): abilitare dopo aver verificato il cablaggio.
 # ---------------------------------------------------------------------------
 BALANCE_STATE: int = 0          # 0=nessuno, 1=banco1 (SERIE1), 2=banco2 (SERIE2)
 BALANCE_SINCE: float = 0.0      # monotonic: inizio carica del banco corrente
@@ -569,7 +572,15 @@ def balance_setup():
     print(f"[balance] SETUP pins=({p1},{p2}) active_high={active_high} -> entrambi OFF", flush=True)
 
 def balance_set(bank: int):
-    """Imposta quale banco caricare (0=off, 1=SERIE1, 2=SERIE2). Mutua esclusione + break-before-make."""
+    """Seleziona il banco pilotando i DUE rele' INSIEME (schema sperimentale 2026-06-14, cablaggio reale).
+    Cablaggio: NC1->neg.banco1, NO1+NC2->cavo serie (M), NO2->pos.banco2.
+    => banco1 = ENTRAMBI OFF (0-0), banco2 = ENTRAMBI ON (1-1).
+    Stati misti: '1-0' (relay1 ON/relay2 OFF) = corto (innocuo su caricatore CC); '0-1'
+    (relay1 OFF/relay2 ON) = 48V sul caricatore = PERICOLOSO. L'ordine sotto fa attraversare il
+    transitorio SEMPRE per '1-0' (corto) e MAI per '0-1'.
+    relay2 = gpio_pin_bank2 = il rele' che da SOLO darebbe '0-1' (NO->positivo banco2): acceso per
+    ULTIMO, spento per PRIMO. relay1 = gpio_pin_bank1 = rele' 'esterno' (ON per primo / OFF per ultimo).
+    => invariante: relay2 e' ON solo se relay1 e' gia' ON, quindi '0-1' non si verifica mai."""
     global BALANCE_STATE, BALANCE_SINCE, BALANCE_LAST_TOGGLE
     bank = int(bank)
     if bank == BALANCE_STATE:
@@ -581,21 +592,30 @@ def balance_set(bank: int):
     active_high = bool(cfg.get("active_high", True))
     on_level = active_high
     off_level = (not active_high)
-    p1 = int(cfg.get("gpio_pin_bank1", 23))
-    p2 = int(cfg.get("gpio_pin_bank2", 24))
-    # break-before-make: spegni SEMPRE entrambi, pausa, poi accendi il target
-    _gpio_write(p1, off_level)
-    _gpio_write(p2, off_level)
-    if bank in (1, 2):
-        time.sleep(0.25)
-        _gpio_write(p1 if bank == 1 else p2, on_level)
-        if BALANCE_STATE == 0:
-            BALANCE_SINCE = time.monotonic()
+    relay1 = int(cfg.get("gpio_pin_bank1", 23))   # esterno: ON per primo / OFF per ultimo
+    relay2 = int(cfg.get("gpio_pin_bank2", 24))   # interno (0-1=48V da solo): ON per ultimo / OFF per primo
+    delay = float(cfg.get("switch_delay_s", 0.15))
+    if bank == 2:
+        # banco2 = ENTRAMBI ON: prima relay1 (esterno), assesta, poi relay2 -> transitorio '1-0' (corto), mai '0-1'
+        _gpio_write(relay1, on_level)
+        _tb = time.monotonic()
+        time.sleep(delay)
+        _gpio_write(relay2, on_level)
+        _tc = time.monotonic()
+        _seq = f"relay1(GPIO{relay1}) ON -> relay2(GPIO{relay2}) ON"
     else:
-        BALANCE_SINCE = 0.0
+        # banco1 o 0 -> ENTRAMBI OFF: prima relay2 (interno), assesta, poi relay1 -> transitorio '1-0', mai '0-1'
+        _gpio_write(relay2, off_level)
+        _tb = time.monotonic()
+        time.sleep(delay)
+        _gpio_write(relay1, off_level)
+        _tc = time.monotonic()
+        _seq = f"relay2(GPIO{relay2}) OFF -> relay1(GPIO{relay1}) OFF"
+    BALANCE_SINCE = time.monotonic() if bank in (1, 2) else 0.0
     BALANCE_STATE = bank
     BALANCE_LAST_TOGGLE = time.monotonic()
-    print(f"[balance] SET -> banco {bank} (1=SERIE1, 2=SERIE2, 0=off)", flush=True)
+    _lbl = "banco2 (rele 1-1)" if bank == 2 else ("banco1 (rele 0-0)" if bank == 1 else "OFF/stop (rele 0-0)")
+    print(f"[balance] SET -> {_lbl} | timing: {_seq}, gap misurato {(_tc-_tb)*1000:.1f}ms (delay set {delay*1000:.0f}ms)", flush=True)
 
 def balance_manual(bank, seconds: float = 30.0):
     """Test cablaggio: forza un banco per 'seconds', poi torna all'automatico."""
