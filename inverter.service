@@ -1,0 +1,20 @@
+[Unit]
+Description=RASPYNVERTER inverter monitor (Flask + Modbus RTU + I2C + relay)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=raspynverter
+WorkingDirectory=/home/raspynverter/RASPYNVERTER_SOFTWARE
+ExecStart=/usr/bin/python3 /home/raspynverter/RASPYNVERTER_SOFTWARE/inverter_api.py
+Restart=on-failure
+RestartSec=5
+# l'app cattura SIGTERM (ferma il poll) ma Flask non esce subito: limita l'attesa di stop
+TimeoutStopSec=15
+Environment=PYTHONUNBUFFERED=1
+# Accesso hardware: seriale (Modbus), bus I2C, GPIO char-device
+SupplementaryGroups=dialout i2c gpio
+
+[Install]
+WantedBy=multi-user.target

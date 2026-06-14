@@ -1,0 +1,139 @@
+{% extends "_base.html" %}
+{% block title %}Diagnostica · Inverter{% endblock %}
+{% block brand %}🔧 Diagnostica{% endblock %}
+{% block banner %}{% endblock %}
+{% block head_extra %}
+{% raw %}
+<style>
+  .diag-out { background: rgba(0,0,0,.25); border: 1px solid rgba(255,255,255,.08); border-radius: 8px; padding: 10px; margin-top: 10px; font-family: ui-monospace, monospace; font-size: .82rem; white-space: pre-wrap; word-break: break-word; max-height: 240px; overflow: auto; }
+  .diag-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin: 6px 0; }
+  .pill { display: inline-block; padding: 3px 10px; border-radius: 999px; font-size: .85rem; background: rgba(255,255,255,.08); }
+  .pill.on { background: #22c55e; color: #042; font-weight: 600; }
+  .pill.off { background: #64748b; color: #fff; }
+  .warn { color: #f59e0b; font-size: .85rem; }
+</style>
+{% endraw %}
+{% endblock %}
+{% block footer %}Diagnostica · banco-prova hardware (relè, Modbus, I2C){% endblock %}
+{% block content %}
+    <!-- Relè -->
+    <section class="cards-row">
+      <div class="card">
+        <h3>🔌 Relè (GPIO 17)</h3>
+        <p class="warn">⚠️ ON/OFF attivano fisicamente il relè.</p>
+        <div class="diag-row">
+          <button id="relayOn" class="btn">Accendi (ON)</button>
+          <button id="relayOff" class="btn btn--secondary">Spegni (OFF)</button>
+          <button id="relayState" class="btn btn--ghost">Leggi stato</button>
+          <span id="relayPill" class="pill off">stato: ?</span>
+        </div>
+        <div id="relayOut" class="diag-out">—</div>
+      </div>
+    </section>
+
+    <!-- Modbus live -->
+    <section class="cards-row">
+      <div class="card">
+        <h3>📟 Modbus inverter (live)</h3>
+        <div class="diag-row">
+          <button id="mbRead" class="btn">Leggi ora</button>
+          <label><input type="checkbox" id="mbAuto" /> auto (2s)</label>
+        </div>
+        <table>
+          <tr><td>PV</td><td id="mb_pv">-</td></tr>
+          <tr><td>Batteria</td><td id="mb_batt">-</td></tr>
+          <tr><td>Rete</td><td id="mb_grid">-</td></tr>
+          <tr><td>Casa</td><td id="mb_load">-</td></tr>
+          <tr><td>Temp. inverter</td><td id="mb_temp">-</td></tr>
+          <tr><td>Ultimo errore</td><td id="mb_err">—</td></tr>
+        </table>
+        <div id="mbRaw" class="diag-out">—</div>
+      </div>
+    </section>
+
+    <!-- I2C live -->
+    <section class="cards-row">
+      <div class="card">
+        <h3>🧪 I2C / ADC (live)</h3>
+        <div class="diag-row"><button id="i2cRead" class="btn">Leggi ora</button></div>
+        <div id="i2cRaw" class="diag-out">—</div>
+      </div>
+    </section>
+
+    <!-- Server -->
+    <section class="cards-row">
+      <div class="card">
+        <h3>🛠️ Server</h3>
+        <div class="diag-row"><button id="ping" class="btn btn--ghost">Ping server</button></div>
+        <div id="maintOut" class="diag-out">—</div>
+      </div>
+    </section>
+{% endblock %}
+{% block scripts %}
+{% raw %}
+<script>
+  (function(){
+    async function api(path, method){
+      try {
+        const r = await fetch(path, { method: method || 'GET' });
+        const txt = await r.text();
+        let body; try { body = JSON.parse(txt); } catch { body = txt; }
+        return { ok: r.ok, status: r.status, body };
+      } catch (e) {
+        return { ok: false, status: 0, body: { error: String(e) } };
+      }
+    }
+    const $ = id => document.getElementById(id);
+    const show = (id, v) => { const el = $(id); if (el) el.textContent = (typeof v === 'string') ? v : JSON.stringify(v, null, 2); };
+
+    // --- Relè ---
+    function relayState(body){
+      let st = null;
+      if (body && typeof body === 'object') st = (body.state !== undefined) ? body.state : (body.relay ? body.relay.state : null);
+      const pill = $('relayPill');
+      if (st === true)  { pill.className = 'pill on';  pill.textContent = 'stato: ON'; }
+      else if (st === false) { pill.className = 'pill off'; pill.textContent = 'stato: OFF'; }
+      else { pill.className = 'pill'; pill.textContent = 'stato: ?'; }
+    }
+    async function doRelay(action){
+      const res = await api('/api/relay/' + action, action === 'state' ? 'GET' : 'POST');
+      show('relayOut', res.body);
+      relayState(res.body);
+    }
+    $('relayOn').addEventListener('click', () => doRelay('on'));
+    $('relayOff').addEventListener('click', () => doRelay('off'));
+    $('relayState').addEventListener('click', () => doRelay('state'));
+
+    // --- Modbus ---
+    let mbTimer = null;
+    async function mbRead(){
+      const res = await api('/api/inverter');
+      const d = (res.body && typeof res.body === 'object') ? res.body : {};
+      const n = (v, u) => (v === undefined || v === null) ? '-' : (v + (u || ''));
+      show('mb_pv',   `${n(d.pv_w,' W')} · ${n(d.pv_v,' V')} · ${n(d.pv_a,' A')}`);
+      show('mb_batt', `${n(d.battery_w,' W')} · ${n(d.battery_v,' V')} · ${n(d.battery_a,' A')}`);
+      show('mb_grid', `${n(d.grid_w,' W')} · ${n(d.grid_v,' V')}`);
+      show('mb_load', `${n(d.load_w,' W')}`);
+      show('mb_temp', `${n(d.inverter_temp,' °C')}`);
+      show('mb_err',  d.last_error ? d.last_error : '—');
+      show('mbRaw', res.body);
+    }
+    $('mbRead').addEventListener('click', mbRead);
+    $('mbAuto').addEventListener('change', function(){
+      if (mbTimer) { clearInterval(mbTimer); mbTimer = null; }
+      if (this.checked) { mbRead(); mbTimer = setInterval(mbRead, 2000); }
+    });
+
+    // --- I2C ---
+    $('i2cRead').addEventListener('click', async () => show('i2cRaw', (await api('/api/i2c/latest')).body));
+
+    // --- Server ---
+    $('ping').addEventListener('click', async () => show('maintOut', (await api('/api/test')).body));
+
+    // stato relè iniziale
+    doRelay('state');
+  })();
+</script>
+{% endraw %}
+<script src="/status.mod.js?v=20260606"></script>
+{% endblock %}

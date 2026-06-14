@@ -1,0 +1,164 @@
+{% extends "_base.html" %}
+{% block title %}Batteria · Inverter{% endblock %}
+{% block brand %}🔋 Batteria{% endblock %}
+{% block head_extra %}<script src="/chart.umd.min.js"></script>{% endblock %}
+{% block footer %}Batteria · stato, taratura SOC e correnti per-cella (I2C/ADS1115){% endblock %}
+{% block content %}
+    <section class="cards-row">
+      <div class="card">
+        <div class="card-header-with-donut">
+          <h3>🔋 Batteria</h3>
+          <div class="donut-status-container">
+            <div class="soc-display"><span id="soc_label">-</span></div>
+            <div class="donut-wrap compact"><canvas id="batteryDonut" aria-label="SOC batteria" role="img"></canvas></div>
+          </div>
+        </div>
+        <div class="card-content">
+          <table>
+            <tr><td>Potenza</td><td id="battery_power">-</td></tr>
+            <tr><td>Tensione</td><td id="battery_v">-</td></tr>
+            <tr><td>Corrente</td><td id="battery_a">-</td></tr>
+            <tr class="battery-status-row">
+              <td>Stato</td>
+              <td><div class="status-info"><span id="battery_state">-</span></div></td>
+            </tr>
+          </table>
+          <div class="chart-container" id="chartContainerBattery" style="display:block; margin-top:12px;">
+            <canvas id="chartBatt" role="img" aria-label="Batteria"></canvas>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>🧪 I2C / ADC (celle)</h3>
+        <div class="card-content">
+          <div id="i2c_container">
+            <table id="i2c_table" aria-label="Letture I2C/ADC">
+              <tr><td>Stato</td><td id="i2c_status">Nessun dato</td></tr>
+            </table>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Taratura SOC (conteggio energetico) -->
+    <section class="cards-row">
+      <div class="card">
+        <h3>🎛️ Taratura SOC (batteria)</h3>
+        <p style="color:var(--muted);font-size:.9rem;margin:.2rem 0 .6rem">
+          Il SOC usa il <strong>conteggio energetico</strong>. Premi <strong>Carica 100%</strong> quando la batteria è
+          completamente carica e <strong>Azzera (vuoto)</strong> quando è al minimo: i due punti tarano il calcolo.
+        </p>
+        <div id="battCalInfo" style="margin-bottom:10px;font-size:.9rem;color:var(--muted)">Stato: caricamento…</div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button id="btnBatteryFull" class="btn" type="button">🔋 Carica 100%</button>
+          <button id="btnBatteryReset" class="btn btn--danger" type="button">🪫 Azzera (vuoto)</button>
+        </div>
+        <label style="display:flex;align-items:center;gap:8px;margin-top:12px;font-size:.9rem;cursor:pointer">
+          <input type="checkbox" id="autocalEnabled" />
+          🤖 Auto-calibrazione al pieno (rileva la carica completa e tara il 100% da solo)
+        </label>
+        <div id="battCalOut" style="margin-top:10px;font-size:.85rem;color:var(--muted)">—</div>
+      </div>
+    </section>
+
+    <!-- Bilanciamento banchi -->
+    <section class="cards-row">
+      <div class="card">
+        <h3>⚖️ Bilanciamento banchi</h3>
+        <p style="color:var(--muted);font-size:.9rem;margin:.2rem 0 .6rem">
+          Commuta un caricatore 24V <strong>isolato</strong> sul banco più scarico (SERIE1/SERIE2) finché si riallineano.
+          <strong>Verifica il cablaggio coi tasti Test prima di attivare l'automatico.</strong>
+        </p>
+        <div id="balInfo" style="margin-bottom:10px;font-size:.9rem;color:var(--muted)">Stato: caricamento…</div>
+        <label style="display:flex;align-items:center;gap:8px;margin-bottom:10px;font-size:.9rem;cursor:pointer">
+          <input type="checkbox" id="balEnabled" />
+          Abilita bilanciamento automatico
+        </label>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button id="balTest1" class="btn btn--secondary" type="button">🔌 Test relè Banco 1</button>
+          <button id="balTest2" class="btn btn--secondary" type="button">🔌 Test relè Banco 2</button>
+          <button id="balStop" class="btn btn--danger" type="button">⏹ Stop</button>
+        </div>
+        <div id="balOut" style="margin-top:10px;font-size:.85rem;color:var(--muted)">—</div>
+      </div>
+    </section>
+
+    <section class="chart-wide">
+      <div class="card hist-controls">
+        <label>Storico celle — Data</label>
+        <input type="date" id="i2cDate" />
+        <button id="i2cApply" class="btn" type="button">Applica</button>
+      </div>
+      <div class="chart-card"><canvas id="chartI2C" role="img" aria-label="Storico batterie: SERIE1, SERIE2, BATT1-5"></canvas></div>
+    </section>
+{% endblock %}
+{% block scripts %}
+<script src="/app.mod.js?v=20260609"></script>
+{% raw %}
+<script>
+// Taratura SOC: Carica 100% (net = capacita') / Azzera (net = 0)
+(function(){
+  var info=document.getElementById('battCalInfo'), out=document.getElementById('battCalOut');
+  function setOut(t){ if(out) out.textContent=t; }
+  async function refresh(){
+    try{
+      var inv=await (await fetch('/api/inverter')).json();
+      var soc=(inv && inv.soc_pct!=null)? Number(inv.soc_pct).toFixed(1)+'%' : '—';
+      var net=(inv && inv.battery_net_wh!=null)? (inv.battery_net_wh/1000).toFixed(2)+' kWh' : '—';
+      var since='—';
+      try{ var st=await (await fetch('/api/battery/status')).json(); if(st&&st.counter&&st.counter.start_timestamp) since=st.counter.start_timestamp; }catch(e){}
+      if(info) info.textContent='SOC attuale: '+soc+'  ·  energia netta: '+net+'  ·  ultima taratura: '+since;
+    }catch(e){ if(info) info.textContent='stato non disponibile'; }
+  }
+  async function post(url, msg){
+    if(!confirm(msg)) return;
+    setOut('invio…');
+    try{ var r=await fetch(url,{method:'POST'}); var j=await r.json(); setOut((j&&j.message)? j.message : JSON.stringify(j)); }
+    catch(e){ setOut('errore: '+e); }
+    setTimeout(refresh, 500);
+  }
+  var bf=document.getElementById('btnBatteryFull'), br=document.getElementById('btnBatteryReset');
+  if(bf) bf.addEventListener('click', function(){ post('/api/battery/full', 'Segnare la batteria come CARICA (100%)? Tara il SOC al massimo.'); });
+  if(br) br.addEventListener('click', function(){ post('/api/battery/reset', 'Azzerare il contatore (batteria VUOTA, SOC 0%)? Tara il SOC al minimo.'); });
+  var ac=document.getElementById('autocalEnabled');
+  if(ac){
+    fetch('/api/battery/autocal').then(function(r){return r.json();}).then(function(j){ ac.checked = !!(j && j.enabled); }).catch(function(){});
+    ac.addEventListener('change', function(){
+      fetch('/api/battery/autocal', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({enabled: ac.checked})})
+        .then(function(r){return r.json();}).then(function(){ setOut(ac.checked ? '🤖 Auto-calibrazione attivata' : 'Auto-calibrazione disattivata'); }).catch(function(){ setOut('errore toggle auto-calibrazione'); });
+    });
+  }
+  refresh(); setInterval(refresh, 15000);
+})();
+
+// Bilanciamento banchi: stato + toggle + test relè
+(function(){
+  var info=document.getElementById('balInfo'), out=document.getElementById('balOut'), en=document.getElementById('balEnabled');
+  if(!info && !en) return;
+  function setOut(t){ if(out) out.textContent=t; }
+  function render(j){
+    if(!j){ if(info) info.textContent='stato non disponibile'; return; }
+    if(en) en.checked = !!j.enabled;
+    var bank = j.charging_bank===1 ? 'Banco 1 (SERIE1)' : (j.charging_bank===2 ? 'Banco 2 (SERIE2)' : 'nessuno');
+    var s1 = (j.serie1_v!=null)? Number(j.serie1_v).toFixed(2)+'V' : '—';
+    var s2 = (j.serie2_v!=null)? Number(j.serie2_v).toFixed(2)+'V' : '—';
+    var d  = (j.diff_v!=null)? Number(j.diff_v).toFixed(3)+'V' : '—';
+    var extra = (j.manual_test_sec_left>0)? '  ·  TEST '+j.manual_test_sec_left+'s' : '';
+    if(info) info.textContent='SERIE1='+s1+'   SERIE2='+s2+'   Δ='+d+'   ·   in carica: '+bank+extra+(j.available?'':'  (GPIO non disp.)');
+  }
+  function refresh(){ fetch('/api/balance').then(function(r){return r.json();}).then(render).catch(function(){ if(info) info.textContent='stato non disponibile'; }); }
+  function post(body, msg){ setOut(msg||'invio…'); fetch('/api/balance',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}).then(function(r){return r.json();}).then(function(j){ render(j); setOut(j&&j.ok?'OK':'errore'); }).catch(function(e){ setOut('errore: '+e); }); }
+  if(en) en.addEventListener('change', function(){
+    if(en.checked && !confirm('Abilitare il bilanciamento AUTOMATICO? Verifica che caricatore ISOLATO e cablaggio siano corretti.')){ en.checked=false; return; }
+    post({enabled: en.checked}, en.checked?'Abilitazione…':'Disabilitazione…');
+  });
+  var b1=document.getElementById('balTest1'), b2=document.getElementById('balTest2'), bs=document.getElementById('balStop');
+  if(b1) b1.addEventListener('click', function(){ if(confirm('TEST: attiva il relè del Banco 1 per 30s (collega il caricatore al banco 1). Procedere?')) post({manual_bank:1, seconds:30}, 'Test Banco 1 (30s)…'); });
+  if(b2) b2.addEventListener('click', function(){ if(confirm('TEST: attiva il relè del Banco 2 per 30s (collega il caricatore al banco 2). Procedere?')) post({manual_bank:2, seconds:30}, 'Test Banco 2 (30s)…'); });
+  if(bs) bs.addEventListener('click', function(){ post({manual_bank:0}, 'Stop…'); });
+  refresh(); setInterval(refresh, 5000);
+})();
+</script>
+{% endraw %}
+{% endblock %}

@@ -1,0 +1,39 @@
+{% extends "_base.html" %}
+{% block title %}Rete &amp; Casa · Inverter{% endblock %}
+{% block brand %}⚡ Rete &amp; Casa{% endblock %}
+{% block head_extra %}<script src="/chart.umd.min.js"></script>{% endblock %}
+{% block footer %}Rete &amp; Casa · prelievo dalla rete e consumo domestico{% endblock %}
+{% block content %}
+    <section class="cards-row">
+      <div class="card">
+        <h3>⚡ Rete</h3>
+        <div class="card-content">
+          <table>
+            <tr><td>Potenza</td><td id="grid_power">-</td></tr>
+            <tr><td>Tensione</td><td id="grid_v">-</td></tr>
+            <tr><td>Frequenza</td><td id="grid_hz">-</td></tr>
+            <tr><td>Corrente</td><td id="grid_a">-</td></tr>
+          </table>
+          <div class="chart-container" id="chartContainerGrid" style="display:block; margin-top:12px;">
+            <canvas id="chartGrid" role="img" aria-label="Rete"></canvas>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>🏠 Casa</h3>
+        <div class="card-content">
+          <table>
+            <tr><td>Potenza</td><td id="load_power">-</td></tr>
+            <tr><td>Tensione</td><td id="load_v">-</td></tr>
+            <tr><td>Frequenza</td><td id="load_hz">-</td></tr>
+            <tr><td>Corrente</td><td id="load_a">-</td></tr>
+          </table>
+          <div class="chart-container" id="chartContainerLoad" style="display:block; margin-top:12px;">
+            <canvas id="chartLoad" role="img" aria-label="Casa"></canvas>
+          </div>
+        </div>
+      </div>
+    </section>
+{% endblock %}
+{% block scripts %}<script src="/app.mod.js?v=20260609"></script>{% endblock %}

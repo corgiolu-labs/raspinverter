@@ -1,0 +1,18 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# Runtime data (SQLite history DB) — auto-creato al primo avvio
+data/
+*.db
+*.db-wal
+*.db-shm
+
+# Config LIVE con taratura specifica dell'impianto — usare inverter_config.example.json come template
+config/inverter_config.json
+
+# Log
+*.log

@@ -1,0 +1,27 @@
+{% extends "_base.html" %}
+{% block title %}Storico · Inverter{% endblock %}
+{% block brand %}📈 Storico{% endblock %}
+{% block head_extra %}<script src="/chart.umd.min.js"></script>{% endblock %}
+{% block footer %}Storico · energia per ora / giorno / mese / anno{% endblock %}
+{% block content %}
+    <section class="chart-wide">
+      <div class="card hist-controls">
+        <label>Vista</label>
+        <select id="histGran">
+          <option value="hour">Ora (oggi)</option>
+          <option value="day">Giorno (mese)</option>
+          <option value="month">Mese (anno)</option>
+          <option value="year">Anno (storico)</option>
+        </select>
+        <label>Data</label>
+        <input type="date" id="histDate" />
+        <label><input type="checkbox" id="chkPV" checked /> PV</label>
+        <label><input type="checkbox" id="chkBatt" checked /> Batteria netta</label>
+        <label><input type="checkbox" id="chkGrid" checked /> Rete</label>
+        <label><input type="checkbox" id="chkLoad" checked /> Casa</label>
+        <button id="histApply" class="btn" type="button">Applica</button>
+      </div>
+      <div class="chart-card"><canvas id="chartHistory" role="img" aria-label="Storico energia"></canvas></div>
+    </section>
+{% endblock %}
+{% block scripts %}<script src="/app.mod.js?v=20260609"></script>{% endblock %}

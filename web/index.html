@@ -1,0 +1,100 @@
+{% extends "_base.html" %}
+{% block title %}Panoramica · Inverter{% endblock %}
+{% block brand %}📊 Panoramica{% endblock %}
+{% block head_extra %}<script src="/chart.umd.min.js"></script>{% endblock %}
+{% block footer %}Panoramica · valori live e totali del giorno{% endblock %}
+{% block content %}
+    <!-- Valori live a colpo d'occhio -->
+    <section class="cards-row">
+      <div class="card">
+        <h3>☀️ Fotovoltaico</h3>
+        <div class="card-content">
+          <table>
+            <tr><td>Potenza</td><td id="pv_power">-</td></tr>
+            <tr><td>Tensione</td><td id="pv_v">-</td></tr>
+            <tr><td>Corrente</td><td id="pv_a">-</td></tr>
+          </table>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-header-with-donut">
+          <h3>🔋 Batteria</h3>
+          <div class="donut-status-container">
+            <div class="soc-display"><span id="soc_label">-</span></div>
+            <div class="donut-wrap compact"><canvas id="batteryDonut" aria-label="SOC batteria" role="img"></canvas></div>
+          </div>
+        </div>
+        <div class="card-content">
+          <table>
+            <tr><td>Potenza</td><td id="battery_power">-</td></tr>
+            <tr><td>Tensione</td><td id="battery_v">-</td></tr>
+            <tr><td>Corrente</td><td id="battery_a">-</td></tr>
+            <tr class="battery-status-row">
+              <td>Stato</td>
+              <td><div class="status-info"><span id="battery_state">-</span></div></td>
+            </tr>
+          </table>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>⚡ Rete</h3>
+        <div class="card-content">
+          <table>
+            <tr><td>Potenza</td><td id="grid_power">-</td></tr>
+            <tr><td>Tensione</td><td id="grid_v">-</td></tr>
+            <tr><td>Frequenza</td><td id="grid_hz">-</td></tr>
+            <tr><td>Corrente</td><td id="grid_a">-</td></tr>
+          </table>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>🏠 Casa</h3>
+        <div class="card-content">
+          <table>
+            <tr><td>Potenza</td><td id="load_power">-</td></tr>
+            <tr><td>Tensione</td><td id="load_v">-</td></tr>
+            <tr><td>Frequenza</td><td id="load_hz">-</td></tr>
+            <tr><td>Corrente</td><td id="load_a">-</td></tr>
+            <tr><td>Fattore di Potenza</td><td id="load_pf">-</td></tr>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- Energia oggi -->
+    <section class="chart-wide">
+      <div class="card totals-card">
+        <h3>Energia oggi</h3>
+        <div class="energy-grid">
+          <div class="energy-item pv-energy">
+            <div class="energy-icon">☀️</div>
+            <div class="energy-label">Fotovoltaico</div>
+            <div class="energy-value" id="sum_pv">-</div>
+            <div class="energy-unit">kWh</div>
+          </div>
+          <div class="energy-item batt-energy">
+            <div class="energy-icon">🔋</div>
+            <div class="energy-label">Batteria (netta)</div>
+            <div class="energy-value" id="sum_batt_net">-</div>
+            <div class="energy-unit">kWh</div>
+          </div>
+          <div class="energy-item grid-energy">
+            <div class="energy-icon">⚡</div>
+            <div class="energy-label">Rete</div>
+            <div class="energy-value" id="sum_grid">-</div>
+            <div class="energy-unit">kWh</div>
+          </div>
+          <div class="energy-item load-energy">
+            <div class="energy-icon">🏠</div>
+            <div class="energy-label">Casa</div>
+            <div class="energy-value" id="sum_load">-</div>
+            <div class="energy-unit">kWh</div>
+          </div>
+        </div>
+      </div>
+    </section>
+{% endblock %}
+{% block scripts %}<script src="/app.mod.js?v=20260609"></script>{% endblock %}

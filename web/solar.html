@@ -1,0 +1,23 @@
+{% extends "_base.html" %}
+{% block title %}Solare · Inverter{% endblock %}
+{% block brand %}☀️ Solare{% endblock %}
+{% block head_extra %}<script src="/chart.umd.min.js"></script>{% endblock %}
+{% block footer %}Solare · produzione fotovoltaica in tempo reale{% endblock %}
+{% block content %}
+    <section class="cards-row">
+      <div class="card">
+        <h3>☀️ Fotovoltaico</h3>
+        <div class="card-content">
+          <table>
+            <tr><td>Potenza</td><td id="pv_power">-</td></tr>
+            <tr><td>Tensione</td><td id="pv_v">-</td></tr>
+            <tr><td>Corrente</td><td id="pv_a">-</td></tr>
+          </table>
+          <div class="chart-container" id="chartContainerPV" style="display:block; margin-top:12px;">
+            <canvas id="chartPV" role="img" aria-label="PV"></canvas>
+          </div>
+        </div>
+      </div>
+    </section>
+{% endblock %}
+{% block scripts %}<script src="/app.mod.js?v=20260609"></script>{% endblock %}

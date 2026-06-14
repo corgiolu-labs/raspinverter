@@ -1,0 +1,24 @@
+# RASPYNVERTER inverter monitor — runtime dependencies
+# Target: Raspberry Pi 3 (RASPYNVERTER), Debian 13 Trixie, Python 3.11
+# Install (Trixie è externally-managed): usare un venv, oppure
+#   python3 -m pip install --break-system-packages -r requirements.txt
+
+Flask>=2.2
+
+# --- Modbus (inverter su /dev/serial0) ---
+# Il codice è compatibile sia con pymodbus 2.x sia 3.x (vedi read_regs()).
+# pyserial serve a minimalmodbus (driver di fallback) e al transport seriale.
+pymodbus>=3.5
+minimalmodbus>=2.1
+pyserial>=3.5
+
+# --- I2C (ADC ADS1115 per correnti/tensioni batterie) ---
+smbus2>=0.4
+
+# --- Backend GPIO per il relè (solo Linux/Pi) ---
+# Su Debian Trixie installare rpi-lgpio: fornisce l'API classica `RPi.GPIO`
+# sopra lgpio (GPIO char-device del kernel). Tira dentro lgpio come dipendenza.
+rpi-lgpio>=0.6 ; sys_platform == "linux"
+
+# --- Opzionale: compressione gzip delle risposte HTTP (decommentare) ---
+# flask-compress>=1.14

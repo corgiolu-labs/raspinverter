@@ -1,0 +1,456 @@
+{% extends "_base.html" %}
+{% block title %}Analisi Off-Grid · Inverter{% endblock %}
+{% block brand %}🔋 Analisi Off-Grid{% endblock %}
+{% block banner %}<div id="msg" class="banner" role="status" aria-live="polite" hidden></div>{% endblock %}
+{% block head_extra %}
+<script src="/chart.umd.min.js"></script>
+{% raw %}
+<style>
+  /* Stili specifici per analisi - estendono main.css */
+  .metric-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 14px; margin: 14px 0; }
+  .metric-item { background: rgba(255,255,255,0.05); padding: 14px; border-radius: 8px; text-align: center; border: 1px solid rgba(255,255,255,0.1); }
+  .metric-value { font-size: 1.5rem; font-weight: bold; color: var(--accent); margin-bottom: 6px; }
+  .metric-value small { font-size: .8rem; font-weight: 500; color: var(--muted); }
+  .metric-label { color: var(--muted); font-size: 0.9rem; }
+  .sub-section { margin: 18px 0; padding: 14px; background: rgba(255,255,255,0.02); border-radius: 8px; border: 1px solid rgba(255,255,255,0.05); }
+  .sub-section h4 { margin: 0 0 12px 0; color: var(--accent); font-size: 1rem; display: flex; align-items: center; gap: 8px; }
+
+  .theme-card[data-theme="autonomy"] { border-left: 4px solid var(--c-grid, #ef4444); }
+  .theme-card[data-theme="battery"]  { border-left: 4px solid var(--c-batt, #22c55e); }
+  .theme-card[data-theme="pv"]       { border-left: 4px solid var(--c-pv, #f59e0b); }
+  .theme-card[data-theme="load"]     { border-left: 4px solid var(--c-load, #60a5fa); }
+  .theme-card[data-theme="diag"]     { border-left: 4px solid var(--error, #ef4444); }
+
+  /* Insight azionabili */
+  .insight-item { display: flex; gap: 10px; align-items: flex-start; padding: 12px; border-radius: 8px; margin: 8px 0; border: 1px solid rgba(255,255,255,.08); background: rgba(255,255,255,.03); }
+  .insight-item .ic { font-size: 1.3rem; line-height: 1.2; }
+  .insight--good   { border-left: 4px solid #22c55e; }
+  .insight--info   { border-left: 4px solid #3b82f6; }
+  .insight--warn   { border-left: 4px solid #f59e0b; background: rgba(245,158,11,.07); }
+  .insight--action { border-left: 4px solid #a855f7; background: rgba(168,85,247,.07); }
+
+  .hour-chart { height: 180px; max-height: 200px; margin-top: 8px; }
+  .seasonal-chart { height: 200px; max-height: 200px; margin: 16px 0; }
+  .ok { color: #22c55e; } .no { color: #f59e0b; }
+
+  .anomaly-item { background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.3); padding: 12px; border-radius: 8px; margin: 8px 0; }
+  .anomaly-high { border-color: rgba(239, 68, 68, 0.6); background: rgba(239, 68, 68, 0.15); }
+  .date-picker { background: var(--surface); border: 1px solid var(--border); color: var(--text); padding: 8px 12px; border-radius: 8px; margin: 16px 0; }
+
+  @media (max-width: 768px) {
+    .metric-grid { grid-template-columns: repeat(2, 1fr); gap: 10px; margin: 12px 0; }
+    .metric-item { padding: 10px; }
+    .metric-value { font-size: 1.2rem; }
+    .metric-label { font-size: 0.78rem; }
+    .sub-section { padding: 12px; }
+    .hour-chart, .seasonal-chart { height: 150px; }
+    .date-picker { width: 100%; font-size: 16px; }
+  }
+  @media (max-width: 360px) {
+    .metric-grid { grid-template-columns: 1fr; gap: 8px; }
+    .metric-value { font-size: 1.1rem; }
+  }
+</style>
+{% endraw %}
+{% endblock %}
+{% block footer %}Analisi · impianto off-grid (rete come backup){% endblock %}
+{% block content %}
+    <div class="card">
+      <h3>📅 Controllo Analisi</h3>
+      <p>Impianto <strong>off-grid</strong> (rete usata solo come backup). Seleziona una data per vedere autonomia, salute batteria, surplus PV e suggerimenti.</p>
+      <div class="toolbar">
+        <input type="date" id="analysisDate" class="date-picker" />
+        <button id="analyzeBtn" class="btn">Analizza Giornata</button>
+        <button id="cleanupBtn" class="btn btn--secondary">Pulisci Campioni</button>
+        <button id="yesterdayBtn" class="btn btn--secondary">Analizza Ieri</button>
+        <button id="todayBtn" class="btn btn--secondary">Analizza Oggi</button>
+        <button id="seasonalBtn" class="btn btn--secondary">Trend 30 giorni</button>
+      </div>
+    </div>
+
+    <div id="analysisResults" style="display: none;">
+      <!-- 💡 INSIGHT AZIONABILI -->
+      <section class="cards-row">
+        <div class="card">
+          <h3>💡 Cosa fare</h3>
+          <div id="insightsList"></div>
+        </div>
+      </section>
+
+      <!-- 📊 RIEPILOGO -->
+      <section class="cards-row">
+        <div class="card">
+          <h3>📊 Riepilogo Giornata <small id="sumCoverage" class="metric-label"></small></h3>
+          <div class="metric-grid">
+            <div class="metric-item"><div class="metric-value" id="sumAutonomy">-</div><div class="metric-label">🌿 Autonomia</div></div>
+            <div class="metric-item"><div class="metric-value" id="sumGridImport">-</div><div class="metric-label">⚡ Prelievo rete (kWh)</div></div>
+            <div class="metric-item"><div class="metric-value" id="sumPv">-</div><div class="metric-label">☀️ Produzione PV (kWh)</div></div>
+            <div class="metric-item"><div class="metric-value" id="sumLoad">-</div><div class="metric-label">🏠 Consumo casa (kWh)</div></div>
+            <div class="metric-item"><div class="metric-value" id="sumMinSoc">-</div><div class="metric-label">🔋 SOC minimo</div></div>
+            <div class="metric-item"><div class="metric-value" id="sumSurplus">-</div><div class="metric-label">🌞 Surplus PV (kWh)</div></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ⚡ AUTONOMIA & RETE -->
+      <section class="cards-row">
+        <div class="card theme-card" data-theme="autonomy">
+          <h3>⚡ Autonomia &amp; Prelievo Rete</h3>
+          <div class="metric-grid">
+            <div class="metric-item"><div class="metric-value" id="autAutonomy">-</div><div class="metric-label">Autonomia</div></div>
+            <div class="metric-item"><div class="metric-value" id="autImport">-</div><div class="metric-label">Prelievo (kWh)</div></div>
+            <div class="metric-item"><div class="metric-value" id="autPeak">-</div><div class="metric-label">Picco prelievo (kW)</div></div>
+            <div class="metric-item"><div class="metric-value" id="autWindow">-</div><div class="metric-label">Finestra principale</div></div>
+          </div>
+          <div class="sub-section">
+            <h4>🔀 Da dove arriva il consumo (stima)</h4>
+            <div class="metric-grid">
+              <div class="metric-item"><div class="metric-value" id="srcPv">-</div><div class="metric-label">☀️ PV diretto (kWh)</div></div>
+              <div class="metric-item"><div class="metric-value" id="srcBatt">-</div><div class="metric-label">🔋 Batteria (kWh)</div></div>
+              <div class="metric-item"><div class="metric-value" id="srcGrid">-</div><div class="metric-label">⚡ Rete (kWh)</div></div>
+            </div>
+          </div>
+          <div class="sub-section">
+            <h4>⏰ Prelievo dalla rete per ora</h4>
+            <div class="hour-chart"><canvas id="chartGridHour"></canvas></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 🔋 BATTERIA -->
+      <section class="cards-row">
+        <div class="card theme-card" data-theme="battery">
+          <h3>🔋 Salute Batteria (LiFePO₄)</h3>
+          <div class="metric-grid">
+            <div class="metric-item"><div class="metric-value" id="batMinSoc">-</div><div class="metric-label">SOC minimo</div></div>
+            <div class="metric-item"><div class="metric-value" id="batDod">-</div><div class="metric-label">Scarica max (DoD)</div></div>
+            <div class="metric-item"><div class="metric-value" id="batCharge">-</div><div class="metric-label">Carica (kWh)</div></div>
+            <div class="metric-item"><div class="metric-value" id="batDischarge">-</div><div class="metric-label">Scarica (kWh)</div></div>
+            <div class="metric-item"><div class="metric-value" id="batCycles">-</div><div class="metric-label">Cicli equivalenti</div></div>
+            <div class="metric-item"><div class="metric-value" id="batFull">-</div><div class="metric-label">Piena carica oggi?</div></div>
+            <div class="metric-item"><div class="metric-value" id="batBelowRelay">-</div><div class="metric-label">Tempo sotto soglia relè</div></div>
+            <div class="metric-item"><div class="metric-value" id="batVrange">-</div><div class="metric-label">Tensione min/max</div></div>
+          </div>
+          <div class="sub-section">
+            <h4>📉 SOC durante la giornata</h4>
+            <div class="hour-chart"><canvas id="chartSoc"></canvas></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ☀️ PV / SURPLUS -->
+      <section class="cards-row">
+        <div class="card theme-card" data-theme="pv">
+          <h3>☀️ Fotovoltaico &amp; Surplus</h3>
+          <div class="metric-grid">
+            <div class="metric-item"><div class="metric-value" id="pvProd">-</div><div class="metric-label">Produzione (kWh)</div></div>
+            <div class="metric-item"><div class="metric-value" id="pvPeak">-</div><div class="metric-label">Picco (kW)</div></div>
+            <div class="metric-item"><div class="metric-value" id="pvSun">-</div><div class="metric-label">Ore di sole utili</div></div>
+            <div class="metric-item"><div class="metric-value" id="pvSurplus">-</div><div class="metric-label">Surplus stimato (kWh)</div></div>
+            <div class="metric-item"><div class="metric-value" id="pvWindow">-</div><div class="metric-label">Finestra surplus</div></div>
+          </div>
+          <div class="sub-section">
+            <h4>📈 Produzione PV per ora</h4>
+            <div class="hour-chart"><canvas id="chartPvHour"></canvas></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 🏠 CARICO -->
+      <section class="cards-row">
+        <div class="card theme-card" data-theme="load">
+          <h3>🏠 Consumo Casa</h3>
+          <div class="metric-grid">
+            <div class="metric-item"><div class="metric-value" id="loadTot">-</div><div class="metric-label">Consumo (kWh)</div></div>
+            <div class="metric-item"><div class="metric-value" id="loadPeak">-</div><div class="metric-label">Picco (kW)</div></div>
+            <div class="metric-item"><div class="metric-value" id="loadAvg">-</div><div class="metric-label">Media (kW)</div></div>
+            <div class="metric-item"><div class="metric-value" id="loadNight">-</div><div class="metric-label">Consumo notturno (kWh)</div></div>
+            <div class="metric-item"><div class="metric-value" id="loadPf">-</div><div class="metric-label">Fattore di potenza</div></div>
+          </div>
+          <div class="sub-section">
+            <h4>📊 Consumo per ora</h4>
+            <div class="hour-chart"><canvas id="chartLoadHour"></canvas></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 🚨 DIAGNOSTICA -->
+      <section class="cards-row">
+        <div class="card theme-card" data-theme="diag">
+          <h3>🚨 Diagnostica &amp; Anomalie</h3>
+          <div class="metric-grid">
+            <div class="metric-item"><div class="metric-value" id="diagTotal">-</div><div class="metric-label">Anomalie totali</div></div>
+            <div class="metric-item"><div class="metric-value" id="diagHigh">-</div><div class="metric-label">Alta gravità</div></div>
+            <div class="metric-item"><div class="metric-value" id="diagNight">-</div><div class="metric-label">PV notturne</div></div>
+            <div class="metric-item"><div class="metric-value" id="diagTempInv">-</div><div class="metric-label">Temp. inverter max</div></div>
+            <div class="metric-item"><div class="metric-value" id="diagTempHeat">-</div><div class="metric-label">Temp. dissipatore max</div></div>
+          </div>
+          <div id="anomalyList"></div>
+        </div>
+      </section>
+    </div>
+
+    <!-- 📈 TREND 30 GIORNI -->
+    <section class="cards-row">
+      <div id="seasonalChart" class="card" style="display: none;">
+        <h3 style="margin: 0 0 12px 0; font-size: 1.1rem;">📈 Trend - Ultimi 30 Giorni</h3>
+        <div style="padding: 8px;"><canvas id="seasonalChartCanvas" class="seasonal-chart"></canvas></div>
+      </div>
+    </section>
+{% endblock %}
+{% block scripts %}
+{% raw %}
+<script>
+    const HOURS = Array.from({length: 24}, (_, h) => String(h).padStart(2, '0'));
+    const charts = {};
+    let currentAnalysis = null;
+    let seasonalChart = null;
+
+    document.addEventListener('DOMContentLoaded', () => {
+      const y = new Date(); y.setDate(y.getDate() - 1);
+      document.getElementById('analysisDate').value = y.toISOString().split('T')[0];
+      document.getElementById('analyzeBtn').addEventListener('click', analyzeDailyData);
+      document.getElementById('cleanupBtn').addEventListener('click', cleanupDailyData);
+      document.getElementById('yesterdayBtn').addEventListener('click', () => setDateAndAnalyze(-1));
+      document.getElementById('todayBtn').addEventListener('click', () => setDateAndAnalyze(0));
+      document.getElementById('seasonalBtn').addEventListener('click', showSeasonalInsights);
+    });
+
+    function setDateAndAnalyze(off) {
+      const d = new Date(); d.setDate(d.getDate() + off);
+      document.getElementById('analysisDate').value = d.toISOString().split('T')[0];
+      analyzeDailyData();
+    }
+
+    async function analyzeDailyData() {
+      const date = document.getElementById('analysisDate').value;
+      if (!date) { showMessage('Seleziona una data', 'error'); return; }
+      showMessage('Analisi in corso...', 'info');
+      try {
+        const r = await fetch(`/api/analysis/daily/${date}`);
+        if (!r.ok) {
+          let msg;
+          if (r.status === 404) {
+            msg = `Nessun dato per ${date}: quel giorno non ha campioni registrati.`;
+          } else {
+            let body = null; try { body = await r.json(); } catch (_) {}
+            msg = (body && body.error) ? body.error : `Errore HTTP ${r.status}`;
+          }
+          document.getElementById('analysisResults').style.display = 'none';
+          showMessage(msg, r.status === 404 ? 'warning' : 'error');
+          return;
+        }
+        currentAnalysis = await r.json();
+        displayAnalysis(currentAnalysis);
+        showMessage(`Analisi completata per ${date}`, 'success');
+      } catch (e) {
+        showMessage(`Errore analisi: ${e.message}`, 'error');
+      }
+    }
+
+    async function cleanupDailyData() {
+      if (!currentAnalysis) { showMessage("Prima esegui un'analisi", 'warning'); return; }
+      const date = currentAnalysis.date;
+      if (!confirm(`Cancellare i campioni grezzi per ${date}? L'analisi resta salvata.`)) return;
+      showMessage('Pulizia in corso...', 'info');
+      try {
+        const r = await fetch(`/api/analysis/cleanup/${date}`, { method: 'POST' });
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        const res = await r.json();
+        showMessage(res.message || 'Pulizia completata', 'success');
+      } catch (e) {
+        showMessage(`Errore pulizia: ${e.message}`, 'error');
+      }
+    }
+
+    async function showSeasonalInsights() {
+      showMessage('Caricamento trend...', 'info');
+      try {
+        const r = await fetch('/api/analysis/seasonal');
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        displaySeasonalChart(await r.json());
+        showMessage('Trend caricato', 'success');
+      } catch (e) {
+        showMessage(`Errore trend: ${e.message}`, 'error');
+      }
+    }
+
+    // ---- helpers ----
+    const kwh = v => (v == null ? 'N/A' : `${Number(v).toFixed(2)}`);
+    const pct = v => (v == null ? 'N/A' : `${Number(v).toFixed(0)}%`);
+    const kw  = v => (v == null ? 'N/A' : `${Number(v).toFixed(2)}`);
+    const txt = v => (v == null || v === '' ? 'N/A' : v);
+    const set = (id, val) => { const el = document.getElementById(id); if (el) el.innerHTML = val; };
+
+    function displayAnalysis(a) {
+      document.getElementById('analysisResults').style.display = 'block';
+      const s = a.summary || {}, au = a.autonomy || {}, b = a.battery || {}, pv = a.pv || {}, ld = a.load || {}, dg = a.diagnostics || {};
+      const cov = a.data_coverage || {};
+
+      // Riepilogo
+      set('sumCoverage', cov.hours_covered != null ? `· ${cov.hours_covered}h di dati · ${a.total_samples || 0} campioni` : '');
+      set('sumAutonomy', `${pct(s.autonomy_pct)} ${s.full_autonomy_day ? '<small class="ok">off-grid</small>' : ''}`);
+      set('sumGridImport', kwh(s.grid_import_kwh));
+      set('sumPv', kwh(s.pv_production_kwh));
+      set('sumLoad', kwh(s.load_consumption_kwh));
+      set('sumMinSoc', `${pct(s.battery_min_soc_pct)} ${s.battery_reached_full ? '<small class="ok">100% ✓</small>' : '<small class="no">no 100%</small>'}`);
+      set('sumSurplus', kwh(s.pv_surplus_estimate_kwh));
+
+      // Insight
+      renderInsights(a.insights || []);
+
+      // Autonomia
+      set('autAutonomy', pct(au.autonomy_pct));
+      set('autImport', kwh(au.grid_import_kwh));
+      set('autPeak', kw(au.grid_import_peak_kw));
+      set('autWindow', txt(au.main_import_window));
+      set('srcPv', kwh(au.load_from_pv_direct_kwh));
+      set('srcBatt', kwh(au.load_from_battery_kwh));
+      set('srcGrid', kwh(au.load_from_grid_kwh));
+      drawBars('chartGridHour', 'Prelievo rete (kWh)', au.grid_import_by_hour, '#ef4444');
+
+      // Batteria
+      set('batMinSoc', `${pct(b.min_soc_pct)} <small>(${txt(b.min_soc_time)})</small>`);
+      set('batDod', pct(b.max_dod_pct));
+      set('batCharge', kwh(b.charge_kwh));
+      set('batDischarge', kwh(b.discharge_kwh));
+      set('batCycles', b.equiv_cycles != null ? Number(b.equiv_cycles).toFixed(2) : 'N/A');
+      set('batFull', b.reached_full ? `<span class="ok">Sì ${b.full_charge_time ? '(' + b.full_charge_time + ')' : ''}</span>` : '<span class="no">No</span>');
+      set('batBelowRelay', b.time_below_relay_v_min != null ? `${b.time_below_relay_v_min} min` : 'N/A');
+      set('batVrange', (b.min_voltage != null) ? `${b.min_voltage}–${b.max_voltage} V` : 'N/A');
+      drawSoc('chartSoc', b.soc_by_hour);
+
+      // PV
+      set('pvProd', kwh(pv.production_kwh));
+      set('pvPeak', kw(pv.peak_kw));
+      set('pvSun', pv.sun_hours != null ? `${pv.sun_hours} h` : 'N/A');
+      set('pvSurplus', kwh(pv.surplus_estimate_kwh));
+      set('pvWindow', txt(pv.surplus_window));
+      drawBars('chartPvHour', 'Produzione PV (kWh)', pv.production_by_hour, '#f59e0b');
+
+      // Carico
+      set('loadTot', kwh(ld.consumption_kwh));
+      set('loadPeak', kw(ld.peak_kw));
+      set('loadAvg', kw(ld.avg_kw));
+      set('loadNight', kwh(ld.night_consumption_kwh));
+      set('loadPf', ld.avg_power_factor != null ? Number(ld.avg_power_factor).toFixed(2) : 'N/A');
+      drawBars('chartLoadHour', 'Consumo casa (kWh)', ld.by_hour, '#60a5fa');
+
+      // Diagnostica
+      set('diagTotal', dg.total_anomalies != null ? dg.total_anomalies : 0);
+      set('diagHigh', dg.high_severity || 0);
+      set('diagNight', dg.pv_night_anomalies || 0);
+      set('diagTempInv', dg.max_inverter_temp != null ? `${dg.max_inverter_temp}°C` : 'N/A');
+      set('diagTempHeat', dg.max_heatsink_temp != null ? `${dg.max_heatsink_temp}°C` : 'N/A');
+      displayAnomalies(dg.anomalies || []);
+    }
+
+    function renderInsights(list) {
+      const c = document.getElementById('insightsList');
+      c.innerHTML = '';
+      if (!list.length) { c.innerHTML = '<p class="ok">✅ Nessuna criticità.</p>'; return; }
+      list.forEach(i => {
+        const div = document.createElement('div');
+        div.className = `insight-item insight--${i.level || 'info'}`;
+        div.innerHTML = `<span class="ic">${i.icon || '•'}</span><span>${i.text || ''}</span>`;
+        c.appendChild(div);
+      });
+    }
+
+    function displayAnomalies(list) {
+      const c = document.getElementById('anomalyList');
+      c.innerHTML = '';
+      if (!list.length) { c.innerHTML = '<p class="ok">✅ Nessuna anomalia rilevata</p>'; return; }
+      list.forEach(an => {
+        const div = document.createElement('div');
+        div.className = `anomaly-item ${an.severity === 'high' ? 'anomaly-high' : ''}`;
+        let detail = an.note ? an.note
+          : (an.type && an.type.includes('power_peak')) ? `Picco ${an.value} kW (soglia ${an.threshold} kW)`
+          : (an.change_kw != null) ? `Variazione ${an.change_kw} kW`
+          : '';
+        div.innerHTML = `<strong>${(an.type || 'anomalia').replace(/_/g, ' ')}</strong>
+          <span class="pill" style="float:right">${(an.severity || '').toUpperCase()}</span>
+          <div style="margin-top:6px;color:var(--muted)"><small>${formatTime(an.timestamp)}</small> — ${detail}</div>`;
+        c.appendChild(div);
+      });
+    }
+
+    // ---- charts ----
+    function seriesOf(obj) { return HOURS.map((_, h) => (obj && obj[String(h)] != null) ? obj[String(h)] : 0); }
+
+    function baseOpts(maxY) {
+      return {
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { display: false } },
+        scales: {
+          x: { ticks: { font: { size: 9 }, maxRotation: 0, autoSkip: true, maxTicksLimit: 12 }, grid: { display: false } },
+          y: { beginAtZero: true, suggestedMax: maxY, ticks: { font: { size: 9 }, maxTicksLimit: 5 } }
+        }
+      };
+    }
+
+    function drawBars(id, label, obj, color) {
+      const el = document.getElementById(id); if (!el) return;
+      if (charts[id]) charts[id].destroy();
+      charts[id] = new Chart(el.getContext('2d'), {
+        type: 'bar',
+        data: { labels: HOURS, datasets: [{ label, data: seriesOf(obj), backgroundColor: color, borderRadius: 3 }] },
+        options: baseOpts(undefined)
+      });
+    }
+
+    function drawSoc(id, obj) {
+      const el = document.getElementById(id); if (!el) return;
+      const data = HOURS.map((_, h) => (obj && obj[String(h)] != null) ? obj[String(h)] : null);
+      if (charts[id]) charts[id].destroy();
+      charts[id] = new Chart(el.getContext('2d'), {
+        type: 'line',
+        data: { labels: HOURS, datasets: [{ label: 'SOC %', data, borderColor: '#22c55e', backgroundColor: 'rgba(34,197,94,.15)', fill: true, tension: 0.3, pointRadius: 0, borderWidth: 2, spanGaps: true }] },
+        options: { ...baseOpts(100), scales: { ...baseOpts(100).scales, y: { beginAtZero: true, max: 100, ticks: { font: { size: 9 }, maxTicksLimit: 5, callback: v => v + '%' } } } }
+      });
+    }
+
+    function displaySeasonalChart(seasonal) {
+      document.getElementById('seasonalChart').style.display = 'block';
+      const ctx = document.getElementById('seasonalChartCanvas').getContext('2d');
+      if (seasonalChart) seasonalChart.destroy();
+      const sorted = (seasonal.seasonal_data || []).sort((a, b) => new Date(a.date) - new Date(b.date));
+      seasonalChart = new Chart(ctx, {
+        type: 'line',
+        data: {
+          labels: sorted.map(d => d.date),
+          datasets: [
+            { label: 'Ore di luce', data: sorted.map(d => d.daylight_hours), borderColor: '#f59e0b', backgroundColor: 'rgba(245,158,11,.1)', yAxisID: 'y', tension: .3, pointRadius: 0 },
+            { label: 'Produzione PV (kWh)', data: sorted.map(d => d.pv_energy), borderColor: '#22c55e', backgroundColor: 'rgba(34,197,94,.1)', yAxisID: 'y1', tension: .3, pointRadius: 0 }
+          ]
+        },
+        options: {
+          responsive: true, maintainAspectRatio: false,
+          interaction: { mode: 'index', intersect: false },
+          plugins: { legend: { position: 'top', labels: { boxWidth: 12, padding: 8, font: { size: 11 } } } },
+          scales: {
+            x: { ticks: { font: { size: 10 }, maxRotation: 45, callback: function (v) { const d = new Date(this.getLabelForValue(v)); return d.toLocaleDateString('it-IT', { day: '2-digit', month: 'short' }); } } },
+            y:  { type: 'linear', position: 'left',  title: { display: true, text: 'Ore di luce', font: { size: 11 } }, ticks: { font: { size: 10 }, maxTicksLimit: 6 } },
+            y1: { type: 'linear', position: 'right', title: { display: true, text: 'PV (kWh)', font: { size: 11 } }, ticks: { font: { size: 10 }, maxTicksLimit: 6 }, grid: { drawOnChartArea: false } }
+          }
+        }
+      });
+    }
+
+    function formatTime(ts) {
+      if (!ts) return '';
+      try { return new Date(ts).toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' }); }
+      catch { return ts; }
+    }
+
+    function showMessage(text, type = 'info') {
+      const el = document.getElementById('msg');
+      el.textContent = text;
+      el.className = `banner ${type}`;
+      el.hidden = false;
+      setTimeout(() => { el.hidden = true; }, 5000);
+    }
+</script>
+{% endraw %}
+<script src="/status.mod.js?v=20260606"></script>
+{% endblock %}
