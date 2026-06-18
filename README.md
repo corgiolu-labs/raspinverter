@@ -25,6 +25,10 @@ PWA con tema scuro, grafici **Chart.js** (DB-backed) e valori **live**: inverter
 
 Impianto **off-grid** monitorato: inverter ibrido **EASUN**, banco **LiFePO4 51,2 V / 500 Ah** (10 celle prismatiche), correnti di cella via sensori **Hall WCS1800**, tensioni via **ADS1115** (I2C), lettura inverter via **RS485 / Modbus RTU**, relè di load-control e bilanciamento banchi.
 
+**Centralina progettata e stampata in 3D** — in un solo chassis: il **Raspberry Pi**, il **convertitore DC-DC** che alimenta il Pi prelevando dal banco 1 a 24 V (+ tampone 5 V previsto), **2× ADS1115** che digitalizzano i sensori a **effetto Hall** (correnti) e i **partitori di tensione** (tensioni dei due banchi, istante per istante), e il modulo **RS485** che legge l'inverter via **Modbus** e alimenta la dashboard.
+
+![Centralina autoprogettata e stampata in 3D: Raspberry Pi + DC-DC + 2x ADS1115 + RS485](docs/hardware-chassis.jpg)
+
 | Impianto completo | Quadro (inverter, contatori, Pi) |
 |:---:|:---:|
 | ![Impianto completo](docs/hardware-system.jpg) | ![Quadro elettrico](docs/hardware-panel.jpg) |
