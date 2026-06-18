@@ -21,6 +21,20 @@ PWA con tema scuro, grafici **Chart.js** (DB-backed) e valori **live**: inverter
 
 <sub>Screenshot dal sistema reale in funzione (Raspberry Pi 3 «RASPYNVERTER») — dati live.</sub>
 
+## Il sistema reale
+
+Impianto **off-grid** monitorato: inverter ibrido **EASUN**, banco **LiFePO4 51,2 V / 500 Ah** (10 celle prismatiche), correnti di cella via sensori **Hall WCS1800**, tensioni via **ADS1115** (I2C), lettura inverter via **RS485 / Modbus RTU**, relè di load-control e bilanciamento banchi.
+
+| Impianto completo | Quadro (inverter, contatori, Pi) |
+|:---:|:---:|
+| ![Impianto completo](docs/hardware-system.jpg) | ![Quadro elettrico](docs/hardware-panel.jpg) |
+
+| Raspberry Pi + cablaggio GPIO | Adattatore RS485 (Modbus RTU) |
+|:---:|:---:|
+| ![Raspberry Pi](docs/hardware-pi.jpg) | ![Adattatore RS485](docs/hardware-modbus.jpg) |
+
+<sub>Foto del sistema reale in funzione · metadati EXIF rimossi.</sub>
+
 ## Cosa è cambiato rispetto all'originale
 - ❌ Rimosso `auto_graph_generator.py` e la cartella `graphs/` (generavano PNG mensili **mai usati** dalla web app) → **eliminate le dipendenze pesanti `matplotlib` + `seaborn` + `pandas`**.
 - ❌ Rimosso `inverter.log` (artefatto vecchio).
