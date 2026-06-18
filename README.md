@@ -3,6 +3,24 @@
 Versione **distillata e ottimizzata** del software, pensata per girare sul Raspberry Pi 3 **RASPYNVERTER**.
 Backend Flask + SQLite, dashboard PWA con grafici **Chart.js DB-backed**, lettura inverter **Modbus RTU** + sensori **I2C ADS1115**, controllo **relè** GPIO.
 
+## Dashboard
+
+PWA con tema scuro, grafici **Chart.js** (DB-backed) e valori **live**: inverter via **Modbus RTU**, tensioni di cella via **I2C ADS1115**, totali energia del giorno.
+
+![Panoramica](docs/dashboard-overview.png)
+
+| ☀️ Produzione fotovoltaica (live) | 📊 Energia per ora (storico) |
+|:---:|:---:|
+| ![Solare](docs/dashboard-solar.png) | ![Storico](docs/dashboard-history.png) |
+
+🔋 **Batteria** — SOC, potenza/tensione/corrente, tensioni **per-cella** (ADS1115), taratura e storico celle:
+
+![Batteria](docs/dashboard-battery.png)
+
+<p align="center"><img src="docs/dashboard-mobile.png" width="300" alt="Vista mobile (PWA)"></p>
+
+<sub>Screenshot dal sistema reale in funzione (Raspberry Pi 3 «RASPYNVERTER») — dati live.</sub>
+
 ## Cosa è cambiato rispetto all'originale
 - ❌ Rimosso `auto_graph_generator.py` e la cartella `graphs/` (generavano PNG mensili **mai usati** dalla web app) → **eliminate le dipendenze pesanti `matplotlib` + `seaborn` + `pandas`**.
 - ❌ Rimosso `inverter.log` (artefatto vecchio).
