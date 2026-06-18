@@ -33,9 +33,9 @@ Impianto **off-grid** monitorato: inverter ibrido **EASUN**, banco **LiFePO4 51,
 |:---:|:---:|
 | ![Impianto completo](docs/hardware-system.jpg) | ![Quadro elettrico](docs/hardware-panel.jpg) |
 
-| Raspberry Pi + cablaggio GPIO | Adattatore RS485 (Modbus RTU) |
-|:---:|:---:|
-| ![Raspberry Pi](docs/hardware-pi.jpg) | ![Adattatore RS485](docs/hardware-modbus.jpg) |
+| Raspberry Pi + GPIO | Sensore corrente Hall WCS1800 | Adattatore RS485 (Modbus) |
+|:---:|:---:|:---:|
+| ![Raspberry Pi](docs/hardware-pi.jpg) | ![Sensore Hall WCS1800](docs/hardware-wcs1800.jpg) | ![Adattatore RS485](docs/hardware-modbus.jpg) |
 
 <sub>Foto del sistema reale in funzione · metadati EXIF rimossi.</sub>
 
