@@ -81,6 +81,7 @@
         <div class="muted" id="gridReason" style="margin-top:4px">—</div>
         <div class="muted" style="margin-top:4px">V tot <b id="gridVtot">—</b> · banco debole <b id="gridWeak">—</b> → ~<span id="gridProj">—</span> V in 60s</div>
         <div class="muted">trigger <span id="gridTrig">—</span> V · cutoff <span id="gridCut">—</span> V · floor <span id="gridFloor">—</span> V · bilanciato <span id="gridBal">—</span></div>
+        <div class="muted" id="gridLive" style="margin-top:6px;border-top:1px solid rgba(255,255,255,.08);padding-top:6px">controllo live: —</div>
       </div>
     </section>
 {% endblock %}
@@ -162,6 +163,19 @@
       body: JSON.stringify({phase:'soc_calibration', enabled: asoc.checked})}).catch(()=>{});
   });
   loadApply();
+  async function loadGrid(){
+    try {
+      const g = await (await fetch('/api/grid')).json();
+      const mode  = g.applied ? '🔴 APPLY (controlla il relè)' : '🟢 dry-run (osserva)';
+      const dec   = (g.f4_on===true) ? 'ATTIVA ORA' : (g.f4_on===false ? 'non necessaria' : '—');
+      const relay = (g.relay_on===true) ? 'ON' : (g.relay_on===false ? 'OFF' : '—');
+      let html = 'controllo live: <b>'+mode+'</b> · decisione F4: <b>'+dec+'</b> · relè ENEL: <b>'+relay+'</b>';
+      if (g.rate_v_min!=null) html += ' · scarica '+g.rate_v_min+' V/min';
+      if (g.reason) html += '<br><span style="opacity:.85">'+g.reason+'</span>';
+      const el=$('gridLive'); if(el) el.innerHTML = html;
+    } catch(e){}
+  }
+  loadGrid(); setInterval(loadGrid, 4000);
 })();
 </script>
 {% endraw %}
