@@ -1,0 +1,101 @@
+{% extends "_base.html" %}
+{% block title %}Apprendimento · Inverter{% endblock %}
+{% block brand %}🤖 Apprendimento{% endblock %}
+{% block banner %}{% endblock %}
+{% block head_extra %}
+{% raw %}
+<style>
+  .learn-grid { display:grid; gap:12px; grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); }
+  .kpi { font-size:1.7rem; font-weight:700; }
+  .kpi small { font-size:.8rem; font-weight:400; color:var(--muted); }
+  .conf { display:inline-block; padding:2px 8px; border-radius:999px; font-size:.72rem; }
+  .conf.alta{background:#22c55e;color:#042}
+  .conf.media{background:#f59e0b;color:#311}
+  .conf.bassa{background:#64748b;color:#fff}
+  .conf.nd{background:#334155;color:#cbd5e1}
+  .muted{color:var(--muted);font-size:.85rem}
+  .rec{margin:6px 0;padding:8px 10px;background:rgba(255,255,255,.05);border-left:3px solid #38bdf8;border-radius:6px;font-size:.9rem}
+  .shadow-badge{background:#1e293b;border:1px solid #38bdf8;color:#7dd3fc;padding:3px 10px;border-radius:999px;font-size:.78rem}
+</style>
+{% endraw %}
+{% endblock %}
+{% block footer %}Apprendimento adattivo · shadow mode (osserva e impara, non modifica il SOC){% endblock %}
+{% block content %}
+    <section class="cards-row">
+      <div class="card">
+        <h3>🤖 Stato apprendimento <span id="modeBadge" class="shadow-badge">shadow</span></h3>
+        <p class="muted">Il servizio impara dai dati reali <b>senza toccare il SOC</b>. Aggiornato ogni ~10 min.
+           Ultimo run: <span id="updatedAt">—</span></p>
+        <div id="recs"></div>
+      </div>
+    </section>
+    <section class="learn-grid">
+      <div class="card">
+        <h3>🔋 Capacità reale</h3>
+        <div class="kpi"><span id="capAh">—</span> <small>Ah</small></div>
+        <div class="muted" id="capVs">—</div>
+        <div class="muted">cicli pieno→vuoto: <span id="capN">0</span> · <span id="capConf" class="conf nd">n/d</span></div>
+      </div>
+      <div class="card">
+        <h3>🧲 Allineamento sensori Hall</h3>
+        <div class="kpi"><span id="hallBias">—</span> <small>A bias vs inverter</small></div>
+        <div class="muted">±<span id="hallSd">—</span> A · campioni: <span id="hallN">0</span> · <span id="hallConf" class="conf nd">n/d</span></div>
+        <div class="muted" id="hallChans" style="margin-top:6px"></div>
+      </div>
+      <div class="card">
+        <h3>⚡ Soglie osservate</h3>
+        <div class="muted" style="margin:6px 0">Pieno: <b id="fullObs">—</b> V <span>(config <span id="fullCfg">—</span> V)</span></div>
+        <div class="muted" style="margin:6px 0">Vuoto: <b id="emptyObs">—</b> V <span>(config <span id="emptyCfg">—</span> V)</span></div>
+      </div>
+      <div class="card">
+        <h3>♻️ Efficienza coulombica</h3>
+        <div class="kpi"><span id="eff">—</span></div>
+        <div class="muted" id="effNote" style="margin-top:6px">—</div>
+      </div>
+    </section>
+{% endblock %}
+{% block scripts %}
+{% raw %}
+<script>
+(function(){
+  const $ = id => document.getElementById(id);
+  function setConf(id, c){
+    const el = $(id); if(!el) return;
+    const k = (c==='alta'||c==='media'||c==='bassa') ? c : 'nd';
+    el.className = 'conf ' + k; el.textContent = c || 'n/d';
+  }
+  async function load(){
+    let d; try { d = await (await fetch('/api/learn')).json(); } catch(e){ return; }
+    $('updatedAt').textContent = d.updated_at || 'mai eseguito';
+    $('modeBadge').textContent = d.mode || 'shadow';
+    const cap = d.capacity || {};
+    $('capAh').textContent = (cap.value_ah!=null) ? cap.value_ah : '—';
+    $('capVs').textContent = (cap.vs_nominal_pct!=null) ? (cap.vs_nominal_pct+'% del nominale') : (cap.note||'—');
+    $('capN').textContent = cap.n_cycles||0; setConf('capConf', cap.confidence);
+    const h = d.hall_bias || {};
+    $('hallBias').textContent = (h.bias_a!=null) ? ((h.bias_a>0?'+':'')+h.bias_a) : '—';
+    $('hallSd').textContent = (h.stdev_a!=null) ? h.stdev_a : '—';
+    $('hallN').textContent = h.n_samples||0; setConf('hallConf', h.confidence);
+    if(h.per_channel_mean_a){
+      $('hallChans').textContent = 'media per-canale (A): ' +
+        Object.entries(h.per_channel_mean_a).map(([k,v])=>k+'='+v).join('  ');
+    } else { $('hallChans').textContent = h.note ? h.note : ''; }
+    const t = d.thresholds || {};
+    $('fullObs').textContent  = (t.full_v_observed!=null)?t.full_v_observed:'—';
+    $('fullCfg').textContent  = (t.full_v_config!=null)?t.full_v_config:'—';
+    $('emptyObs').textContent = (t.empty_v_observed!=null)?t.empty_v_observed:'—';
+    $('emptyCfg').textContent = (t.empty_v_config!=null)?t.empty_v_config:'—';
+    const ef = d.coulombic_efficiency || {};
+    $('eff').textContent = (ef.value!=null)?ef.value:'—';
+    $('effNote').textContent = ef.note || '';
+    const recs = d.recommendations || [];
+    $('recs').innerHTML = recs.length
+      ? recs.map(r=>'<div class="rec">'+r+'</div>').join('')
+      : '<div class="muted">Nessuna raccomandazione ancora — il servizio è in apprendimento.</div>';
+  }
+  load(); setInterval(load, 30000);
+  const rb = $('btnRefresh'); if(rb) rb.addEventListener('click', load);
+})();
+</script>
+{% endraw %}
+{% endblock %}

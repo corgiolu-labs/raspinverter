@@ -1,0 +1,251 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+inverter-learn — stima adattiva online (Fase 1, SHADOW MODE).
+
+Legge lo storico (battery_counters, i2c_snapshots, samples) e impara nel tempo
+i parametri reali del banco batteria, SENZA toccare il SOC ne' la config:
+  - capacita' reale (Ah)            dai cicli pieno->vuoto (invecchiamento)
+  - bias sensori Hall vs inverter   (deriva di taratura)
+  - tensioni pieno/vuoto osservate  vs soglie configurate
+
+Output: data/learned_params.json (valore + confidenza + n_campioni + note).
+Pensato per girare da un timer systemd ogni ~10 min. Read-only sul DB (WAL).
+Nessuna azione, nessuna scrittura di config: e' una fase di sola osservazione.
+"""
+import json
+import re
+import statistics
+from datetime import datetime, timedelta
+
+from config import DATA_DIR, _get
+from database import db
+
+LEARNED_PATH = DATA_DIR / "learned_params.json"
+SCHEMA_VERSION = 1
+
+
+def _now():
+    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _ema(old, new, alpha=0.3):
+    return float(new) if old is None else (1.0 - alpha) * float(old) + alpha * float(new)
+
+
+def _cfg_floats():
+    def f(path, d):
+        try:
+            return float(_get(path, d))
+        except Exception:
+            return float(d)
+    return {
+        "nominal_ah": f("battery.nominal_ah", 500.0),
+        "v_nom": f("battery.nominal_voltage", 51.2),
+        "vmax_v": f("battery.soc.vmax_v", 57.0),
+        "reset_v": f("battery.net_reset_voltage", 46.0),
+        "charge_eff": f("battery.soc.charge_efficiency", 0.99),
+    }
+
+
+# --- estimatore 1: capacita' reale dai cicli pieno->vuoto -------------------
+def estimate_capacity(con, cfg):
+    """Una riga di battery_counters creata da set_battery_full parte con in=cap_nom_wh.
+    Se quella riga si chiude per scarica (46V), il netto scaricato ~ capacita' reale."""
+    v_nom = cfg["v_nom"]
+    nom_ah = cfg["nominal_ah"]
+    cap_nom_wh = nom_ah * v_nom
+    rows = con.execute("""
+        SELECT id, total_batt_in_Wh, total_batt_out_Wh, reset_reason
+        FROM battery_counters WHERE counter_type='daily_net' ORDER BY id
+    """).fetchall()
+    measures = []
+    for i in range(1, len(rows)):
+        prev_r = rows[i - 1]
+        r = rows[i]
+        started_full = "full" in (prev_r["reset_reason"] or "").lower()
+        rr = (r["reset_reason"] or "").lower()
+        ended_empty = ("discharge" in rr) or ("46" in rr)
+        if not (started_full and ended_empty):
+            continue
+        out = float(r["total_batt_out_Wh"] or 0.0)
+        inn = float(r["total_batt_in_Wh"] or 0.0)
+        # correzione per blip di carica intermedi (la riga partiva con in=cap_nom_wh)
+        net_out_wh = out - max(0.0, inn - cap_nom_wh)
+        # ciclo "pulito": scarica significativa e poca ricarica intermedia
+        if net_out_wh > 0.40 * cap_nom_wh and (inn - cap_nom_wh) < 0.20 * cap_nom_wh:
+            measures.append(net_out_wh / v_nom)  # Ah
+    if not measures:
+        return None
+    val = None
+    for m in measures:           # EMA: i cicli piu' recenti pesano di piu'
+        val = _ema(val, m, 0.4)
+    val = max(0.60 * nom_ah, min(1.05 * nom_ah, val))
+    n = len(measures)
+    return {
+        "value_ah": round(val, 1),
+        "n_cycles": n,
+        "last_measures_ah": [round(x, 1) for x in measures[-5:]],
+        "vs_nominal_pct": round(100.0 * val / nom_ah, 1),
+        "confidence": "alta" if n >= 3 else ("media" if n == 2 else "bassa"),
+    }
+
+
+# --- estimatore 2: bias dei sensori Hall vs inverter ------------------------
+def estimate_hall_bias(con, lookback_h=48, max_rows=4000):
+    """Confronta - Î£(corrente Hall) con battery_a dell'inverter sugli stessi istanti.
+    bias ~ 0 = sensori allineati; un bias stabile != 0 indica deriva di taratura."""
+    since = (datetime.now() - timedelta(hours=lookback_h)).strftime("%Y-%m-%d %H:%M:%S")
+    snaps = con.execute("""
+        SELECT timestamp, data FROM i2c_snapshots
+        WHERE timestamp >= ? ORDER BY timestamp DESC LIMIT ?
+    """, (since, max_rows)).fetchall()
+    if not snaps:
+        return None
+    ba = {}
+    for row in con.execute(
+        "SELECT timestamp, battery_a FROM samples WHERE timestamp >= ?", (since,)
+    ).fetchall():
+        if row["battery_a"] is not None:
+            ba[row["timestamp"]] = float(row["battery_a"])
+    diffs = []
+    chan_means = {"BATT1": [], "BATT2": [], "BATT3": [], "BATT4": [], "BATT5": []}
+    for s in snaps:
+        try:
+            d = json.loads(s["data"])
+        except Exception:
+            continue
+        m1 = d.get("adc_mod1", {}) or {}
+        m2 = d.get("adc_mod2", {}) or {}
+        vals = {n: (m1.get(n) or {}).get("current_a") for n in ("BATT1", "BATT2", "BATT3", "BATT4")}
+        vals["BATT5"] = (m2.get("BATT5") or {}).get("current_a")
+        cur = [v for v in vals.values() if v is not None]
+        if len(cur) < 5:
+            continue
+        for n, v in vals.items():
+            if v is not None:
+                chan_means[n].append(v)
+        inv = ba.get(s["timestamp"])
+        if inv is not None:
+            diffs.append((-sum(cur)) - inv)  # carica: Hall negativo, battery_a positivo
+    if not diffs:
+        return None
+    n = len(diffs)
+    return {
+        "bias_a": round(statistics.fmean(diffs), 2),
+        "stdev_a": round(statistics.pstdev(diffs) if n > 1 else 0.0, 2),
+        "n_samples": n,
+        "per_channel_mean_a": {k: round(statistics.fmean(a), 2) for k, a in chan_means.items() if a},
+        "confidence": "alta" if n >= 500 else ("media" if n >= 100 else "bassa"),
+    }
+
+
+# --- estimatore 3: tensioni pieno/vuoto realmente osservate -----------------
+def estimate_thresholds(con, cfg):
+    rows = con.execute("""
+        SELECT start_timestamp, reset_reason FROM battery_counters
+        WHERE counter_type='daily_net' ORDER BY id
+    """).fetchall()
+    full_vs = []
+    empty_vs = []
+    for i in range(len(rows)):
+        rr = rows[i]["reset_reason"] or ""
+        m = re.search(r"discharge_([\d.]+)V", rr)   # es. "battery_46.0v_discharge_45.8V"
+        if m:
+            try:
+                empty_vs.append(float(m.group(1)))
+            except Exception:
+                pass
+        # riga creata da set_full = quella la cui PRECEDENTE chiude con 'full'
+        if i >= 1 and "full" in (rows[i - 1]["reset_reason"] or "").lower():
+            t = rows[i]["start_timestamp"]
+            srow = con.execute(
+                "SELECT battery_v FROM samples WHERE timestamp <= ? ORDER BY timestamp DESC LIMIT 1",
+                (t,)
+            ).fetchone()
+            if srow and srow["battery_v"] is not None:
+                full_vs.append(float(srow["battery_v"]))
+    out = {}
+    if full_vs:
+        out["full_v_observed"] = round(statistics.fmean(full_vs[-5:]), 1)
+        out["full_v_config"] = round(cfg["vmax_v"], 1)
+        out["n_full"] = len(full_vs)
+    if empty_vs:
+        out["empty_v_observed"] = round(statistics.fmean(empty_vs[-5:]), 1)
+        out["empty_v_config"] = round(cfg["reset_v"], 1)
+        out["n_empty"] = len(empty_vs)
+    return out or None
+
+
+def main():
+    cfg = _cfg_floats()
+    try:
+        prev = json.loads(LEARNED_PATH.read_text(encoding="utf-8"))
+    except Exception:
+        prev = {}
+
+    out = {
+        "schema_version": SCHEMA_VERSION,
+        "mode": "shadow",            # Fase 1: osserva e impara, NON applica nulla al SOC
+        "updated_at": _now(),
+        "config_snapshot": cfg,
+    }
+    recs = []
+    cap = hall = thr = None
+    try:
+        with db() as con:
+            cap = estimate_capacity(con, cfg)
+            hall = estimate_hall_bias(con)
+            thr = estimate_thresholds(con, cfg)
+    except Exception as e:
+        out["error"] = f"db: {e}"
+
+    # capacita': EMA anche tra run successivi (continuita')
+    if cap:
+        prev_cap = (prev.get("capacity") or {}).get("value_ah")
+        if prev_cap is not None:
+            cap["value_ah"] = round(_ema(prev_cap, cap["value_ah"], 0.3), 1)
+            cap["vs_nominal_pct"] = round(100.0 * cap["value_ah"] / cfg["nominal_ah"], 1)
+        out["capacity"] = cap
+        if cap["vs_nominal_pct"] < 90:
+            recs.append(f"Capacita' reale ~{cap['value_ah']:.0f} Ah ({cap['vs_nominal_pct']:.0f}% del nominale): "
+                        f"segni di invecchiamento, valuta nominal_ah={cap['value_ah']:.0f}.")
+        else:
+            recs.append(f"Capacita' reale ~{cap['value_ah']:.0f} Ah ({cap['vs_nominal_pct']:.0f}% del nominale): in salute.")
+    else:
+        out["capacity"] = {"value_ah": None, "n_cycles": 0,
+                           "note": "servono cicli pieno->vuoto completi per misurarla",
+                           "confidence": "n/d"}
+
+    if hall:
+        out["hall_bias"] = hall
+        if abs(hall["bias_a"]) > 3.0:
+            recs.append(f"Bias Hall vs inverter {hall['bias_a']:+.1f} A: possibile deriva dei sensori, "
+                        f"valuta una ri-taratura degli offset.")
+        else:
+            recs.append(f"Sensori Hall allineati all'inverter (bias {hall['bias_a']:+.1f} A).")
+    else:
+        out["hall_bias"] = {"bias_a": None, "note": "dati i2c insufficienti", "confidence": "n/d"}
+
+    if thr:
+        out["thresholds"] = thr
+        if "full_v_observed" in thr and abs(thr["full_v_observed"] - thr["full_v_config"]) > 1.5:
+            recs.append(f"Pieno reale osservato ~{thr['full_v_observed']:.1f} V vs soglia {thr['full_v_config']:.0f} V.")
+        if "empty_v_observed" in thr and abs(thr["empty_v_observed"] - thr["empty_v_config"]) > 1.5:
+            recs.append(f"Vuoto reale osservato ~{thr['empty_v_observed']:.1f} V vs soglia {thr['empty_v_config']:.0f} V.")
+
+    out["coulombic_efficiency"] = {
+        "value": round(cfg["charge_eff"], 3),
+        "source": "config",
+        "note": "verra' appresa dai cicli completi (fase successiva)",
+    }
+    out["recommendations"] = recs
+
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    LEARNED_PATH.write_text(json.dumps(out, indent=2, ensure_ascii=False), encoding="utf-8")
+    print(f"[learn] {LEARNED_PATH.name}: cap={out['capacity'].get('value_ah')} Ah "
+          f"hall_bias={out['hall_bias'].get('bias_a')} A recs={len(recs)}", flush=True)
+
+
+if __name__ == "__main__":
+    main()

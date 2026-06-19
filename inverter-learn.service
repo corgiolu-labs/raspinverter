@@ -1,0 +1,14 @@
+[Unit]
+Description=RASPYNVERTER learner (stima adattiva SOC/batteria, shadow mode)
+After=inverter.service
+Wants=inverter.service
+
+[Service]
+Type=oneshot
+User=raspynverter
+WorkingDirectory=/home/raspynverter/RASPYNVERTER_SOFTWARE
+ExecStart=/usr/bin/python3 /home/raspynverter/RASPYNVERTER_SOFTWARE/learn.py
+# bassa priorita': non deve mai disturbare il poller principale
+Nice=10
+IOSchedulingClass=idle
+Environment=PYTHONUNBUFFERED=1

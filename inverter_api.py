@@ -334,6 +334,22 @@ def history_page():
 def diagnostics_page():
     return render_template("diagnostics.html")
 
+@app.route("/learning")
+def learning_page():
+    return render_template("learning.html")
+
+@app.route("/api/learn")
+def api_learn():
+    """Stato dell'apprendimento adattivo (shadow). Letto da data/learned_params.json."""
+    p = DATA_DIR / "learned_params.json"
+    try:
+        return jsonify(json.loads(p.read_text(encoding="utf-8")))
+    except Exception:
+        return jsonify({"mode": "shadow", "updated_at": None,
+                        "note": "learner non ancora eseguito",
+                        "capacity": {}, "hall_bias": {}, "thresholds": {},
+                        "coulombic_efficiency": {}, "recommendations": []})
+
 @app.route("/main.css")
 def main_css():
     return send_from_directory(str(WEB_DIR), "main.css", mimetype="text/css")

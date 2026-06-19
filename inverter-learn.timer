@@ -1,0 +1,10 @@
+[Unit]
+Description=Esegue il learner RASPYNVERTER ogni 10 minuti
+
+[Timer]
+OnBootSec=3min
+OnUnitActiveSec=10min
+Persistent=true
+
+[Install]
+WantedBy=timers.target
