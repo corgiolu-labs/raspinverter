@@ -350,6 +350,61 @@ def api_learn():
                         "capacity": {}, "hall_bias": {}, "thresholds": {},
                         "coulombic_efficiency": {}, "recommendations": []})
 
+
+# --- Apply (shadow -> reale): lettura learned con guardrail + toggle per-fase --
+_LEARNED_CACHE = {"mtime": None, "data": {}}
+
+def _learned_params():
+    """Legge data/learned_params.json (cache per mtime). {} se assente/illeggibile."""
+    p = DATA_DIR / "learned_params.json"
+    try:
+        m = p.stat().st_mtime
+        if _LEARNED_CACHE["mtime"] != m:
+            _LEARNED_CACHE["data"] = json.loads(p.read_text(encoding="utf-8"))
+            _LEARNED_CACHE["mtime"] = m
+    except Exception:
+        return {}
+    return _LEARNED_CACHE["data"]
+
+def applied_capacity_wh(default_wh):
+    """Capacita' per il SOC: usa quella APPRESA solo se apply.soc_calibration=on,
+    confidenza alta/media e nei bound [0.5..1.1]x nominale; altrimenti il default config."""
+    try:
+        if not _bool(_get("apply.soc_calibration", False)):
+            return default_wh
+        cap = (_learned_params().get("capacity") or {})
+        v = cap.get("value_ah")
+        if v is None or cap.get("confidence") in (None, "n/d", "bassa"):
+            return default_wh
+        nom = float(_get("battery.nominal_ah", 500))
+        if not (0.5 * nom <= float(v) <= 1.1 * nom):
+            return default_wh
+        return float(v) * float(_get("battery.nominal_voltage", 51.2))
+    except Exception:
+        return default_wh
+
+APPLY_PHASES = ("soc_calibration", "balance", "grid")
+
+@app.route("/api/apply", methods=["GET", "POST"])
+def api_apply():
+    """Toggle per-fase shadow->reale. GET = stato; POST {phase, enabled} imposta e persiste in
+    config (atomico). Default tutto OFF (shadow). Reversibile: OFF -> torna ai valori config."""
+    ap = CONF.setdefault("apply", {})
+    if request.method == "POST":
+        body = request.get_json(silent=True) or {}
+        phase = str(body.get("phase", ""))
+        if phase not in APPLY_PHASES:
+            return jsonify({"ok": False, "error": "phase non valida"}), 400
+        ap[phase] = _bool(body.get("enabled", False))
+        try:
+            tmp = str(CONFIG_PATH) + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(CONF, f, indent=2, ensure_ascii=False)
+            os.replace(tmp, str(CONFIG_PATH))
+        except Exception as e:
+            return jsonify({"ok": False, "error": f"save: {e}"}), 500
+    return jsonify({"ok": True, "apply": {p: _bool(ap.get(p, False)) for p in APPLY_PHASES}})
+
 @app.route("/main.css")
 def main_css():
     return send_from_directory(str(WEB_DIR), "main.css", mimetype="text/css")
@@ -625,7 +680,7 @@ def inverter():
     try:
         method = str(_get("battery.soc.method", "voltage_based"))
         if method == "energy_balance":
-            cap_wh = float(_get("battery.nominal_ah", 500)) * float(_get("battery.nominal_voltage", 51.2))
+            cap_wh = applied_capacity_wh(float(_get("battery.nominal_ah", 500)) * float(_get("battery.nominal_voltage", 51.2)))
             if cap_wh > 0:
                 s["soc_pct"] = round(max(0.0, min(100.0, 100.0 * s["battery_net_wh"] / cap_wh)), 1)
         else:

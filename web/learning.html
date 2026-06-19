@@ -24,9 +24,14 @@
     <section class="cards-row">
       <div class="card">
         <h3>🤖 Stato apprendimento <span id="modeBadge" class="shadow-badge">shadow</span></h3>
-        <p class="muted">Il servizio impara dai dati reali <b>senza toccare il SOC</b>. Aggiornato ogni ~10 min.
-           Ultimo run: <span id="updatedAt">—</span></p>
+        <p class="muted">Il servizio impara dai dati reali. Di default <b>non tocca il SOC</b> (shadow); puoi applicare ciò che ha imparato, una fase per volta, qui sotto. Aggiornato ogni ~10 min. Ultimo run: <span id="updatedAt">—</span></p>
         <div id="recs"></div>
+        <div style="margin-top:10px;border-top:1px solid rgba(255,255,255,.08);padding-top:8px">
+          <label style="display:flex;align-items:center;gap:8px;font-size:.9rem;cursor:pointer">
+            <input type="checkbox" id="applySoc" /> <b>Applica calibrazione SOC appresa (F1)</b>
+          </label>
+          <div class="muted" id="applyNote" style="margin-top:4px">Default OFF. Con capacità non ancora appresa, attivarlo non cambia nulla finché non c'è un ciclo pieno→vuoto completo. Apply F3/F4 in arrivo.</div>
+        </div>
       </div>
     </section>
     <section class="cards-row">
@@ -147,6 +152,16 @@
   }
   load(); setInterval(load, 30000);
   const rb = $('btnRefresh'); if(rb) rb.addEventListener('click', load);
+  async function loadApply(){
+    try { const a = await (await fetch('/api/apply')).json();
+      if (a && a.apply) { const c=$('applySoc'); if(c) c.checked = !!a.apply.soc_calibration; } } catch(e){}
+  }
+  const asoc = $('applySoc');
+  if (asoc) asoc.addEventListener('change', function(){
+    fetch('/api/apply', {method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({phase:'soc_calibration', enabled: asoc.checked})}).catch(()=>{});
+  });
+  loadApply();
 })();
 </script>
 {% endraw %}
