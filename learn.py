@@ -177,6 +177,72 @@ def estimate_thresholds(con, cfg):
     return out or None
 
 
+# --- estimatore 4: previsione pieno/vuoto dai profili orari ------------------
+def estimate_forecast(con, cfg, days=14, horizon_h=48):
+    """Da SOC attuale + profili orari medi PV/carico (ultimi N giorni), proietta in
+    avanti (passi da 30 min) e stima quando la batteria raggiunge pieno (cap) o vuoto (0).
+    Puramente osservativo: nessuna azione."""
+    v_nom = cfg["v_nom"]
+    cap_wh = cfg["nominal_ah"] * v_nom
+    eff = cfg["charge_eff"]
+    if cap_wh <= 0:
+        return None
+    r = con.execute(
+        "SELECT total_batt_net_Wh FROM battery_counters ORDER BY id DESC LIMIT 1"
+    ).fetchone()
+    if not r or r["total_batt_net_Wh"] is None:
+        return None
+    net = float(r["total_batt_net_Wh"])
+    soc_pct = round(100.0 * net / cap_wh, 1)
+    since = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
+    rows = con.execute("""
+        SELECT CAST(strftime('%H', timestamp) AS INTEGER) AS h,
+               AVG(pv_w) AS pv, AVG(load_w) AS ld, COUNT(*) AS n
+        FROM samples WHERE timestamp >= ? GROUP BY h
+    """, (since,)).fetchall()
+    if not rows:
+        return None
+    pv_h = {int(x["h"]): float(x["pv"] or 0.0) for x in rows}
+    ld_h = {int(x["h"]): float(x["ld"] or 0.0) for x in rows}
+    n_tot = sum(int(x["n"] or 0) for x in rows)
+    if len(pv_h) < 12 or n_tot < 500:
+        return {"current_soc_pct": soc_pct, "based_on_days": days, "n_samples": n_tot,
+                "confidence": "n/d",
+                "note": "storico insufficiente per un profilo orario affidabile"}
+    now = datetime.now()
+    full_eta = empty_eta = None
+    was_full = net >= 0.999 * cap_wh
+    was_empty = net <= 0.001 * cap_wh
+    sim = net
+    for step in range(1, horizon_h * 2 + 1):       # passi da 30 minuti
+        t = now + timedelta(minutes=30 * step)
+        flow_w = pv_h.get(t.hour, 0.0) - ld_h.get(t.hour, 0.0)
+        d_wh = flow_w * 0.5
+        if d_wh > 0:
+            d_wh *= eff
+        sim = max(0.0, min(cap_wh, sim + d_wh))
+        if full_eta is None and not was_full and sim >= 0.999 * cap_wh:
+            full_eta = t
+        if empty_eta is None and not was_empty and sim <= 0.001 * cap_wh:
+            empty_eta = t
+
+    def fmt(dt):
+        if dt is None:
+            return None
+        dd = (dt.date() - now.date()).days
+        pre = "oggi " if dd == 0 else ("domani " if dd == 1 else dt.strftime("%d/%m "))
+        return pre + dt.strftime("%H:%M")
+
+    return {
+        "current_soc_pct": soc_pct,
+        "full_eta": fmt(full_eta),
+        "empty_eta": fmt(empty_eta),
+        "based_on_days": days,
+        "n_samples": n_tot,
+        "confidence": "media" if n_tot >= 5000 else "bassa",
+    }
+
+
 def main():
     cfg = _cfg_floats()
     try:
@@ -191,12 +257,13 @@ def main():
         "config_snapshot": cfg,
     }
     recs = []
-    cap = hall = thr = None
+    cap = hall = thr = fc = None
     try:
         with db() as con:
             cap = estimate_capacity(con, cfg)
             hall = estimate_hall_bias(con)
             thr = estimate_thresholds(con, cfg)
+            fc = estimate_forecast(con, cfg)
     except Exception as e:
         out["error"] = f"db: {e}"
 
@@ -233,6 +300,15 @@ def main():
             recs.append(f"Pieno reale osservato ~{thr['full_v_observed']:.1f} V vs soglia {thr['full_v_config']:.0f} V.")
         if "empty_v_observed" in thr and abs(thr["empty_v_observed"] - thr["empty_v_config"]) > 1.5:
             recs.append(f"Vuoto reale osservato ~{thr['empty_v_observed']:.1f} V vs soglia {thr['empty_v_config']:.0f} V.")
+
+    if fc:
+        out["forecast"] = fc
+        if fc.get("full_eta"):
+            recs.append(f"Previsione: batteria piena ~{fc['full_eta']}.")
+        if fc.get("empty_eta"):
+            recs.append(f"Previsione: batteria scarica ~{fc['empty_eta']}.")
+    else:
+        out["forecast"] = {"note": "previsione non disponibile (storico insufficiente)"}
 
     out["coulombic_efficiency"] = {
         "value": round(cfg["charge_eff"], 3),

@@ -29,6 +29,17 @@
         <div id="recs"></div>
       </div>
     </section>
+    <section class="cards-row">
+      <div class="card">
+        <h3>🔮 Previsione</h3>
+        <div class="learn-grid" style="margin-top:4px">
+          <div><div class="muted">SOC attuale</div><div class="kpi"><span id="fcSoc">—</span> <small>%</small></div></div>
+          <div><div class="muted">Piena prevista</div><div class="kpi" style="font-size:1.25rem"><span id="fcFull">—</span></div></div>
+          <div><div class="muted">Scarica prevista</div><div class="kpi" style="font-size:1.25rem"><span id="fcEmpty">—</span></div></div>
+        </div>
+        <div class="muted" id="fcNote" style="margin-top:8px">—</div>
+      </div>
+    </section>
     <section class="learn-grid">
       <div class="card">
         <h3>🔋 Capacità reale</h3>
@@ -88,6 +99,12 @@
     const ef = d.coulombic_efficiency || {};
     $('eff').textContent = (ef.value!=null)?ef.value:'—';
     $('effNote').textContent = ef.note || '';
+    const fc = d.forecast || {};
+    $('fcSoc').textContent   = (fc.current_soc_pct!=null) ? fc.current_soc_pct : '—';
+    $('fcFull').textContent  = fc.full_eta  || (fc.note ? '—' : ((fc.current_soc_pct!=null && fc.current_soc_pct>=99) ? 'già piena' : 'oltre 48h'));
+    $('fcEmpty').textContent = fc.empty_eta || (fc.note ? '—' : ((fc.current_soc_pct!=null && fc.current_soc_pct<=1) ? 'già scarica' : 'oltre 48h'));
+    $('fcNote').textContent  = fc.note ? fc.note
+       : ('basato su ~'+(fc.based_on_days||'?')+' giorni · '+(fc.n_samples||0)+' campioni · confidenza '+(fc.confidence||'n/d'));
     const recs = d.recommendations || [];
     $('recs').innerHTML = recs.length
       ? recs.map(r=>'<div class="rec">'+r+'</div>').join('')
