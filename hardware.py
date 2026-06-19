@@ -723,3 +723,95 @@ def relay_auto_step(batt_v: Optional[float]):
 
     if want != cur and (now - RELAY_LAST_TOGGLE) >= min_gap:
         relay_apply(bool(want))
+
+
+# ---------------------------------------------------------------------------
+# F4: controllo rete ENEL balance-aware (gated da apply.grid). INVARIANTE:
+# puo' solo ANTICIPARE l'aggancio ENEL rispetto a relay_auto_step, mai ritardarlo.
+# ---------------------------------------------------------------------------
+_VBUF = []   # [(monotonic_t, total_v), ...] finestra ~3 min per stimare il rate di scarica
+GRID_CTRL = {"f4_on": None, "reason": "", "weaker_v": None, "rate_v_min": None,
+             "applied": False, "_last_log": 0.0}
+
+def _bank_v_from_i2c(i2c):
+    """SERIE1/SERIE2 (tensioni banchi) dallo snapshot i2c. (None, None) se assenti."""
+    cfg = CONF.get("balance", {})
+    mod = (i2c or {}).get(cfg.get("source_device", "adc_mod2"), {}) if isinstance(i2c, dict) else {}
+    def _v(ch):
+        c = mod.get(ch) if isinstance(mod, dict) else None
+        return c.get("value") if isinstance(c, dict) else None
+    s1, s2 = _v(cfg.get("bank1_channel", "SERIE1")), _v(cfg.get("bank2_channel", "SERIE2"))
+    try:
+        return (float(s1) if s1 is not None else None, float(s2) if s2 is not None else None)
+    except Exception:
+        return (None, None)
+
+def _f4_decision(battery_v, i2c):
+    """Decisione F4 in tempo reale: ENEL ora se V_tot<=trigger OPPURE il banco piu' debole
+    scenderebbe sotto il floor (cutoff+margine) entro enel_sync_s al rate di scarica corrente.
+    Ritorna (want_on: bool, reason: str, weaker_v, rate_v_min)."""
+    g = CONF.get("grid", {})
+    cutoff_v = float(g.get("bank_cutoff_v", 22.2))         # DATOU BOSS over-discharge
+    floor_v = cutoff_v + float(g.get("bank_safety_v", 1.3))
+    trigger_v = float(g.get("trigger_v", 46.0))
+    sync_s = float(g.get("enel_sync_s", 60.0))
+    rate = None
+    if len(_VBUF) >= 2:
+        t0, v0 = _VBUF[0]; t1, v1 = _VBUF[-1]
+        dtm = (t1 - t0) / 60.0
+        if dtm > 0:
+            rate = (v1 - v0) / dtm
+    s1, s2 = _bank_v_from_i2c(i2c)
+    weaker_v = min(s1, s2) if (s1 is not None and s2 is not None) else None
+    reasons = []
+    want = False
+    if battery_v is not None and battery_v <= trigger_v:
+        want = True
+        reasons.append(f"V {battery_v:.1f}<={trigger_v:.0f}")
+    if weaker_v is not None:
+        proj = (weaker_v + (rate / 2.0) * (sync_s / 60.0)) if (rate is not None and rate < 0) else weaker_v
+        if proj <= floor_v:
+            want = True
+            reasons.append(f"banco debole {weaker_v:.1f}->{proj:.1f}<={floor_v:.1f}V/{sync_s:.0f}s")
+    elif battery_v is not None and battery_v <= trigger_v + 1.0:
+        want = True
+        reasons.append("dati banchi assenti vicino soglia (fail-safe)")
+    return want, " · ".join(reasons), weaker_v, rate
+
+def grid_control_step(battery_v, i2c=None):
+    """apply.grid OFF -> relay_auto_step INVARIATO (+ log dry-run di cosa farebbe la F4).
+    apply.grid ON  -> ENEL = relay_auto_step OR decisione F4 (mai ritardo); spegne solo a
+    recupero (V>=off_v, bilanciato, nessun rischio F4). Fail-safe + min_toggle anti-flap."""
+    now = time.monotonic()
+    if battery_v is not None:
+        _VBUF.append((now, float(battery_v)))
+        while _VBUF and _VBUF[0][0] < now - 180:
+            _VBUF.pop(0)
+    apply_on = bool(CONF.get("apply", {}).get("grid", False))
+    want_f4, reason, weaker_v, rate = _f4_decision(battery_v, i2c)
+    GRID_CTRL.update({"f4_on": want_f4, "reason": reason, "weaker_v": weaker_v,
+                      "rate_v_min": (round(rate, 3) if rate is not None else None), "applied": apply_on})
+
+    if not apply_on:
+        relay_auto_step(battery_v)   # comportamento attuale, INVARIATO
+        if want_f4 and RELAY_STATE is not True and (now - GRID_CTRL["_last_log"]) > 60:
+            GRID_CTRL["_last_log"] = now
+            print(f"[grid][dry-run] F4 avrebbe attivato ENEL ora: {reason}", flush=True)
+        return
+
+    cfg = CONF.get("relay", {})
+    if not bool(cfg.get("enabled", False)) or battery_v is None:
+        return
+    on_v = float(cfg.get("on_v", 47.5))
+    off_v = float(cfg.get("off_v", 49.0))
+    min_gap = max(0, int(cfg.get("min_toggle_sec", 5)))
+    s1, s2 = _bank_v_from_i2c(i2c)
+    balanced = (abs(s1 - s2) <= 0.10 * ((s1 + s2) / 2.0)) if (s1 is not None and s2 is not None) else True
+    want_on = (battery_v <= on_v) or want_f4               # OR -> mai dopo relay_auto_step
+    want_off = (battery_v >= off_v) and balanced and (not want_f4)
+    cur = RELAY_STATE
+    target = True if want_on else (False if want_off else cur)
+    if target != cur and (now - RELAY_LAST_TOGGLE) >= min_gap:
+        relay_apply(bool(target))
+        print(f"[grid][APPLY] ENEL {'ON' if target else 'OFF'}: "
+              f"{reason if target else ('V>=%.0f e bilanciato' % off_v)}", flush=True)

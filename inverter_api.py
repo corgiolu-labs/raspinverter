@@ -36,7 +36,7 @@ from database import (
 )
 from hardware import (
     i2c_read_all, read_regs, _blocks, _to_signed16,
-    relay_apply, relay_setup, relay_auto_step,
+    relay_apply, relay_setup, relay_auto_step, grid_control_step,
     _gpio_setup_output, _gpio_write, _gpio_read, _gpio_cleanup, GPIO_BACKEND,
     balance_setup, balance_set, balance_manual, balance_step, balance_status,
 )
@@ -163,7 +163,7 @@ def poll_loop():
                         batt_v = None
                         if "battery_v" in s and s["battery_v"] is not None:
                             batt_v = float(s["battery_v"])
-                        relay_auto_step(batt_v)
+                        grid_control_step(batt_v, LAST_I2C)
                     except Exception:
                         pass
                     
@@ -404,6 +404,13 @@ def api_apply():
         except Exception as e:
             return jsonify({"ok": False, "error": f"save: {e}"}), 500
     return jsonify({"ok": True, "apply": {p: _bool(ap.get(p, False)) for p in APPLY_PHASES}})
+
+@app.route("/api/grid")
+def api_grid():
+    """Decisione F4 in tempo reale (dry-run o apply) per monitoraggio/dashboard."""
+    gc = dict(hardware.GRID_CTRL)
+    gc.pop("_last_log", None)
+    return jsonify({"ok": True, "relay_on": hardware.RELAY_STATE, **gc})
 
 @app.route("/main.css")
 def main_css():
