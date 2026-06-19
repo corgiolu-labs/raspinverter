@@ -73,25 +73,25 @@
             "index": 0,
             "name": "BATT1",
             "zero_offset_mv": 1135,
-            "mv_per_amp": 43.6
+            "mv_per_amp": 30.6
           },
           {
             "index": 1,
             "name": "BATT2",
             "zero_offset_mv": 1680,
-            "mv_per_amp": 43.6
+            "mv_per_amp": 44.3
           },
           {
             "index": 2,
             "name": "BATT3",
             "zero_offset_mv": 1740,
-            "mv_per_amp": 43.6
+            "mv_per_amp": 61.2
           },
           {
             "index": 3,
             "name": "BATT4",
             "zero_offset_mv": 1782,
-            "mv_per_amp": 43.6
+            "mv_per_amp": 51.0
           }
         ]
       },
@@ -106,7 +106,7 @@
             "index": 0,
             "name": "BATT5",
             "zero_offset_mv": 1177,
-            "mv_per_amp": 43.6
+            "mv_per_amp": 37.4
           },
           {
             "index": 1,
