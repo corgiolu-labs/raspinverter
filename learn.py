@@ -309,7 +309,9 @@ def estimate_grid(con, cfg, lookback_min=15):
     decidere e' il banco PIU' DEBOLE: se scenderebbe sotto il cutoff entro ~60s (handoff ENEL)
     va anticipato, perche' un banco che stacca interrompe la serie e spegne l'inverter."""
     trigger_v = float(_get("grid.trigger_v", 46.0))
-    floor_v = float(_get("grid.bank_floor_v", 21.0))      # cutoff banco stimato ~20V + 1V margine
+    cutoff_v = float(_get("grid.bank_cutoff_v", 22.2))    # DATOU BOSS over-discharge (datasheet)
+    margin_v = float(_get("grid.bank_safety_v", 1.3))     # margine di sicurezza sopra il cutoff
+    floor_v = cutoff_v + margin_v                          # ~23.5V: il banco debole non deve arrivarci entro 60s
     tol_pct = float(_get("grid.balance_tol_pct", 10.0))
     sync_s = float(_get("grid.enel_sync_s", 60.0))
     dev = _get("balance.source_device", "adc_mod2")
@@ -376,10 +378,11 @@ def estimate_grid(con, cfg, lookback_min=15):
         "discharge_v_min": round(rate_v_min, 3) if rate_v_min is not None else None,
         "weaker_proj_60s_v": round(weaker_proj, 2) if weaker_proj is not None else None,
         "trigger_v": trigger_v,
-        "bank_floor_v": floor_v,
+        "bank_cutoff_v": cutoff_v,
+        "bank_floor_v": round(floor_v, 1),
         "enel_sync_s": sync_s,
         "relay_real_on_v": float(_get("relay.on_v", 47.5)),
-        "note": "SHADOW: raccomanda, non pilota il rele' (reale=relay_auto_step). bank_floor 21V = stima ~20V+margine, DA VERIFICARE prima di apply.",
+        "note": "SHADOW: raccomanda, non pilota il rele' (reale=relay_auto_step). Cutoff banco 22.2V (datasheet DATOU BOSS over-discharge); floor = cutoff + margine.",
     }
 
 

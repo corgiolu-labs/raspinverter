@@ -75,7 +75,7 @@
         <div class="kpi"><span id="gridRec">—</span></div>
         <div class="muted" id="gridReason" style="margin-top:4px">—</div>
         <div class="muted" style="margin-top:4px">V tot <b id="gridVtot">—</b> · banco debole <b id="gridWeak">—</b> → ~<span id="gridProj">—</span> V in 60s</div>
-        <div class="muted">trigger <span id="gridTrig">—</span> V · floor <span id="gridFloor">—</span> V · bilanciato <span id="gridBal">—</span></div>
+        <div class="muted">trigger <span id="gridTrig">—</span> V · cutoff <span id="gridCut">—</span> V · floor <span id="gridFloor">—</span> V · bilanciato <span id="gridBal">—</span></div>
       </div>
     </section>
 {% endblock %}
@@ -129,6 +129,7 @@
     $('gridWeak').textContent  = g.weaker_bank ? (g.weaker_bank+(g.weaker_v!=null?(' '+g.weaker_v+'V'):'')) : '—';
     $('gridProj').textContent  = (g.weaker_proj_60s_v!=null)?g.weaker_proj_60s_v:'—';
     $('gridTrig').textContent  = (g.trigger_v!=null)?g.trigger_v:'—';
+    $('gridCut').textContent   = (g.bank_cutoff_v!=null)?g.bank_cutoff_v:'—';
     $('gridFloor').textContent = (g.bank_floor_v!=null)?g.bank_floor_v:'—';
     $('gridBal').textContent   = (g.balanced===true)?'sì':(g.balanced===false?'NO':'—');
     const b = d.balance || {};
