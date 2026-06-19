@@ -18,7 +18,7 @@ import re
 import statistics
 from datetime import datetime, timedelta
 
-from config import DATA_DIR, _get
+from config import DATA_DIR, _get, _bool
 from database import db
 
 LEARNED_PATH = DATA_DIR / "learned_params.json"
@@ -243,6 +243,65 @@ def estimate_forecast(con, cfg, days=14, horizon_h=48):
     }
 
 
+# --- estimatore 5: squilibrio banchi (shadow, solo raccomandazione) ---------
+def estimate_balance(con, days=7, max_rows=4000):
+    """Analizza lo squilibrio SERIE1-SERIE2 nel tempo (da i2c_snapshots). SHADOW:
+    raccomanda soltanto; il controllo reale dei rele' resta in balance_step (gated da
+    balance.enabled). diff = banco1 - banco2; chronic_weaker = banco mediamente piu' basso."""
+    dev = _get("balance.source_device", "adc_mod2")
+    ch1 = _get("balance.bank1_channel", "SERIE1")
+    ch2 = _get("balance.bank2_channel", "SERIE2")
+    try:
+        start_diff = float(_get("balance.start_diff_v", 0.3))
+        stop_diff = float(_get("balance.stop_diff_v", 0.1))
+    except Exception:
+        start_diff, stop_diff = 0.3, 0.1
+    since = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
+    rows = con.execute(
+        "SELECT data FROM i2c_snapshots WHERE timestamp >= ? ORDER BY timestamp DESC LIMIT ?",
+        (since, max_rows)
+    ).fetchall()
+    if not rows:
+        return None
+    diffs = []
+    current = None
+    for r in rows:
+        try:
+            d = json.loads(r["data"])
+        except Exception:
+            continue
+        mod = d.get(dev, {}) or {}
+        c1 = mod.get(ch1); c2 = mod.get(ch2)
+        v1 = c1.get("value") if isinstance(c1, dict) else None
+        v2 = c2.get("value") if isinstance(c2, dict) else None
+        if v1 is None or v2 is None:
+            continue
+        diff = float(v1) - float(v2)
+        if current is None:
+            current = {"diff": round(diff, 3), "s1": round(float(v1), 2), "s2": round(float(v2), 2)}
+        diffs.append(diff)
+    if not diffs or current is None:
+        return None
+    n = len(diffs)
+    mean = statistics.fmean(diffs)
+    absd = [abs(x) for x in diffs]
+    pct_above = round(100.0 * sum(1 for x in absd if x >= start_diff) / n, 1)
+    return {
+        "current_diff_v": current["diff"],
+        "serie1_v": current["s1"],
+        "serie2_v": current["s2"],
+        "mean_diff_v": round(mean, 3),
+        "max_abs_diff_v": round(max(absd), 3),
+        "chronic_weaker": "banco2" if mean > 0 else "banco1",
+        "pct_time_above_start": pct_above,
+        "start_diff_v": start_diff,
+        "stop_diff_v": stop_diff,
+        "auto_enabled": _bool(_get("balance.enabled", False), False),
+        "n_samples": n,
+        "confidence": "alta" if n >= 1000 else ("media" if n >= 200 else "bassa"),
+    }
+
+
 def main():
     cfg = _cfg_floats()
     try:
@@ -257,13 +316,14 @@ def main():
         "config_snapshot": cfg,
     }
     recs = []
-    cap = hall = thr = fc = None
+    cap = hall = thr = fc = bal = None
     try:
         with db() as con:
             cap = estimate_capacity(con, cfg)
             hall = estimate_hall_bias(con)
             thr = estimate_thresholds(con, cfg)
             fc = estimate_forecast(con, cfg)
+            bal = estimate_balance(con)
     except Exception as e:
         out["error"] = f"db: {e}"
 
@@ -309,6 +369,16 @@ def main():
             recs.append(f"Previsione: batteria scarica ~{fc['empty_eta']}.")
     else:
         out["forecast"] = {"note": "previsione non disponibile (storico insufficiente)"}
+
+    if bal:
+        out["balance"] = bal
+        cd = bal.get("current_diff_v")
+        if cd is not None and abs(cd) >= bal["start_diff_v"]:
+            recs.append(f"Squilibrio banchi {cd:+.2f} V: {bal['chronic_weaker']} piu' basso, andrebbe bilanciato.")
+        if (not bal["auto_enabled"]) and bal.get("max_abs_diff_v", 0) >= bal["start_diff_v"]:
+            recs.append(f"Auto-bilanciamento OFF ma lo squilibrio ha toccato {bal['max_abs_diff_v']:.2f} V: valuta balance.enabled=true.")
+    else:
+        out["balance"] = {"note": "dati banchi insufficienti"}
 
     out["coulombic_efficiency"] = {
         "value": round(cfg["charge_eff"], 3),

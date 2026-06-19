@@ -63,6 +63,13 @@
         <div class="kpi"><span id="eff">—</span></div>
         <div class="muted" id="effNote" style="margin-top:6px">—</div>
       </div>
+      <div class="card">
+        <h3>⚖️ Bilanciamento banchi</h3>
+        <div class="kpi"><span id="balDiff">—</span> <small>V (banco1−banco2)</small></div>
+        <div class="muted" id="balWeak" style="margin-top:4px">—</div>
+        <div class="muted">media <span id="balMean">—</span> V · max <span id="balMax">—</span> V · sopra-soglia <span id="balPct">—</span>%</div>
+        <div class="muted">auto: <b id="balAuto">—</b> · <span id="balConf" class="conf nd">n/d</span></div>
+      </div>
     </section>
 {% endblock %}
 {% block scripts %}
@@ -105,6 +112,14 @@
     $('fcEmpty').textContent = fc.empty_eta || (fc.note ? '—' : ((fc.current_soc_pct!=null && fc.current_soc_pct<=1) ? 'già scarica' : 'oltre 48h'));
     $('fcNote').textContent  = fc.note ? fc.note
        : ('basato su ~'+(fc.based_on_days||'?')+' giorni · '+(fc.n_samples||0)+' campioni · confidenza '+(fc.confidence||'n/d'));
+    const b = d.balance || {};
+    $('balDiff').textContent = (b.current_diff_v!=null) ? ((b.current_diff_v>0?'+':'')+b.current_diff_v) : '—';
+    $('balWeak').textContent = b.chronic_weaker ? ('più basso (cronico): '+b.chronic_weaker) : (b.note||'—');
+    $('balMean').textContent = (b.mean_diff_v!=null)?b.mean_diff_v:'—';
+    $('balMax').textContent  = (b.max_abs_diff_v!=null)?b.max_abs_diff_v:'—';
+    $('balPct').textContent  = (b.pct_time_above_start!=null)?b.pct_time_above_start:'—';
+    $('balAuto').textContent = (b.auto_enabled===true)?'ON':(b.auto_enabled===false?'OFF':'—');
+    setConf('balConf', b.confidence);
     const recs = d.recommendations || [];
     $('recs').innerHTML = recs.length
       ? recs.map(r=>'<div class="rec">'+r+'</div>').join('')
