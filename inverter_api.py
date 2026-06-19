@@ -169,18 +169,33 @@ def poll_loop():
                     
                     # Battery counter management
                     try:
-                        battery_w = s.get("battery_w")
+                        # corrente totale dai sensori Hall tarati (somma BATT1-5)
+                        hall_total_a = None
+                        try:
+                            if i2c_snapshot:
+                                m1 = i2c_snapshot.get("adc_mod1", {}) or {}
+                                m2 = i2c_snapshot.get("adc_mod2", {}) or {}
+                                chans = [m1.get("BATT1"), m1.get("BATT2"), m1.get("BATT3"), m1.get("BATT4"), m2.get("BATT5")]
+                                vals = [float(c["current_a"]) for c in chans if isinstance(c, dict) and c.get("current_a") is not None]
+                                if vals:
+                                    hall_total_a = sum(vals)
+                        except Exception:
+                            hall_total_a = None
                         battery_v = s.get("battery_v")
-                        
+                        # corrente di carica per il coulomb counting: i Hall danno NEGATIVO in carica -> nego (>0 = carica)
+                        # fallback a battery_a (inverter) solo se i Hall non sono disponibili
+                        charge_a = (-hall_total_a) if hall_total_a is not None else s.get("battery_a")
+
                         # Controlla se e' necessario azzerare il contatore
-                        if check_battery_reset_condition(battery_v, battery_w):
+                        if check_battery_reset_condition(battery_v, charge_a):
                             pass  # Reset automatico silenzioso
                         
-                        # Aggiorna sempre il contatore corrente
-                        update_battery_counter(battery_w, battery_v)
+                        # Aggiorna sempre il contatore corrente (conteggio Ah sulla corrente Hall)
+                        update_battery_counter(charge_a, battery_v)
 
                         # Auto-calibrazione PIENO (regola fisica + plausibilita' PV/giorno)
-                        check_battery_full_condition(battery_v, s.get("battery_a"), s.get("pv_w"))
+                        full_i = hall_total_a if hall_total_a is not None else s.get("battery_a")
+                        check_battery_full_condition(battery_v, full_i, s.get("pv_w"))
                     except Exception as e:
                         print(f"[battery] Errore aggiornamento contatore: {e}", flush=True)
                 else:

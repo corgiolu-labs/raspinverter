@@ -237,31 +237,48 @@ def set_battery_full(reason="full_charge"):
         return cursor.lastrowid
 
 
-def update_battery_counter(battery_w, battery_v):
-    """Aggiorna il contatore della batteria con i nuovi dati."""
-    if battery_w is None or battery_v is None:
+def update_battery_counter(charge_a, battery_v):
+    """Conteggio COULOMB (Ah) sulla corrente Hall tarata.
+    charge_a = corrente di carica dai sensori Hall (A): >0 carica, <0 scarica.
+    Integra gli Ah e li converte in Wh-equivalenti con la TENSIONE NOMINALE COSTANTE
+    (niente skew di tensione carica/scarica). Applica l'efficienza coulombica
+    (battery.soc.charge_efficiency ~0.99) e CLAMPA total_batt_net_Wh a [0, capacita'].
+    net_Wh = net_Ah x V_nom -> SOC = net_Wh/cap_Wh = net_Ah/cap_Ah (frazione di Ah)."""
+    if charge_a is None or battery_v is None:
         return
     counter = get_current_battery_counter()
     if not counter:
         return
-    # Energia in Wh (battery_w in W, campionamento ogni POLL_S secondi)
-    energy_wh = (float(battery_w) * POLL_S) / 3600.0
+    try:
+        v_nom = float(_get("battery.nominal_voltage", 51.2))
+        cap = float(_get("battery.nominal_ah", 500)) * v_nom
+    except Exception:
+        v_nom, cap = 51.2, 0.0
+    if cap <= 0:
+        cap = 25600.0
+    try:
+        eff = float(_get("battery.soc.charge_efficiency", 0.99))
+    except Exception:
+        eff = 0.99
+    # Ah nell'intervallo POLL_S -> Wh-equivalenti a tensione nominale costante
+    energy_wh = (float(charge_a) * v_nom * POLL_S) / 3600.0
     with db() as con:
-        if battery_w > 0:  # Carica
+        if charge_a > 0:  # Carica: efficienza coulombica + clamp a cap
+            e = energy_wh * eff
             con.execute("""
                 UPDATE battery_counters
                 SET total_batt_in_Wh = total_batt_in_Wh + ?,
-                    total_batt_net_Wh = total_batt_in_Wh + ? - total_batt_out_Wh
+                    total_batt_net_Wh = MAX(0.0, MIN(?, total_batt_net_Wh + ?))
                 WHERE id = ?
-            """, (energy_wh, energy_wh, counter['id']))
-        elif battery_w < 0:  # Scarica
-            energy_wh = abs(energy_wh)
+            """, (e, cap, e, counter['id']))
+        elif charge_a < 0:  # Scarica: clamp a 0
+            e = abs(energy_wh)
             con.execute("""
                 UPDATE battery_counters
                 SET total_batt_out_Wh = total_batt_out_Wh + ?,
-                    total_batt_net_Wh = total_batt_in_Wh - (total_batt_out_Wh + ?)
+                    total_batt_net_Wh = MAX(0.0, MIN(?, total_batt_net_Wh - ?))
                 WHERE id = ?
-            """, (energy_wh, energy_wh, counter['id']))
+            """, (e, cap, e, counter['id']))
         con.commit()
 
 

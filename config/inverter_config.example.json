@@ -17,14 +17,15 @@
     "nominal_ah": 500,
     "soc": {
       "method": "energy_balance",
-      "vmax_v": 54.0,
+      "vmax_v": 57.0,
       "vmin_v": 46.0,
-      "reset_voltage": 46.0
+      "reset_voltage": 46.0,
+      "charge_efficiency": 0.99
     },
     "net_reset_voltage": 46.0,
     "autocal": {
       "enabled": true,
-      "full_voltage": 54.0,
+      "full_voltage": 57.0,
       "tail_current_a": 5.0,
       "hold_seconds": 600,
       "min_pv_w": 50.0,
