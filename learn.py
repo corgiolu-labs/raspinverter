@@ -18,7 +18,7 @@ import re
 import statistics
 from datetime import datetime, timedelta
 
-from config import DATA_DIR, _get, _bool
+from config import DATA_DIR, _get, _bool, parse_ts
 from database import db
 
 LEARNED_PATH = DATA_DIR / "learned_params.json"
@@ -302,6 +302,87 @@ def estimate_balance(con, days=7, max_rows=4000):
     }
 
 
+# --- estimatore 6: trigger ENEL balance-aware (F4, shadow) ------------------
+def estimate_grid(con, cfg, lookback_min=15):
+    """F4 SHADOW: raccomandatore trigger rete ENEL. NON pilota il rele' (controllo reale =
+    relay_auto_step). Regola (prove utente): ENEL ON se V_tot<=46V E banchi bilanciati; ma a
+    decidere e' il banco PIU' DEBOLE: se scenderebbe sotto il cutoff entro ~60s (handoff ENEL)
+    va anticipato, perche' un banco che stacca interrompe la serie e spegne l'inverter."""
+    trigger_v = float(_get("grid.trigger_v", 46.0))
+    floor_v = float(_get("grid.bank_floor_v", 21.0))      # cutoff banco stimato ~20V + 1V margine
+    tol_pct = float(_get("grid.balance_tol_pct", 10.0))
+    sync_s = float(_get("grid.enel_sync_s", 60.0))
+    dev = _get("balance.source_device", "adc_mod2")
+    ch1 = _get("balance.bank1_channel", "SERIE1")
+    ch2 = _get("balance.bank2_channel", "SERIE2")
+    s1 = s2 = None
+    snap = con.execute("SELECT data FROM i2c_snapshots ORDER BY timestamp DESC LIMIT 1").fetchone()
+    if snap:
+        try:
+            mod = (json.loads(snap["data"]).get(dev, {}) or {})
+            c1 = mod.get(ch1); c2 = mod.get(ch2)
+            s1 = float(c1["value"]) if isinstance(c1, dict) and c1.get("value") is not None else None
+            s2 = float(c2["value"]) if isinstance(c2, dict) and c2.get("value") is not None else None
+        except Exception:
+            pass
+    srow = con.execute("SELECT battery_v FROM samples ORDER BY timestamp DESC LIMIT 1").fetchone()
+    total_v = float(srow["battery_v"]) if srow and srow["battery_v"] is not None else None
+    # rate di scarica dai samples recenti (V/min, negativo = in scarica)
+    since = (datetime.now() - timedelta(minutes=lookback_min)).strftime("%Y-%m-%d %H:%M:%S")
+    hist = con.execute(
+        "SELECT timestamp, battery_v FROM samples WHERE timestamp >= ? ORDER BY timestamp", (since,)
+    ).fetchall()
+    rate_v_min = None
+    if len(hist) >= 2 and hist[0]["battery_v"] is not None and hist[-1]["battery_v"] is not None:
+        t0 = parse_ts(hist[0]["timestamp"]); t1 = parse_ts(hist[-1]["timestamp"])
+        if t0 and t1:
+            dtm = (t1 - t0).total_seconds() / 60.0
+            if dtm > 0:
+                rate_v_min = (float(hist[-1]["battery_v"]) - float(hist[0]["battery_v"])) / dtm
+    diff = (s1 - s2) if (s1 is not None and s2 is not None) else None
+    weaker = weaker_v = None
+    if s1 is not None and s2 is not None:
+        weaker, weaker_v = ("banco1", s1) if s1 <= s2 else ("banco2", s2)
+    mean_bank = ((s1 + s2) / 2.0) if (s1 is not None and s2 is not None) else None
+    tol_v = (mean_bank * tol_pct / 100.0) if mean_bank else None
+    balanced = (abs(diff) <= tol_v) if (diff is not None and tol_v is not None) else None
+    # proiezione del banco debole a +sync_s (rate per-banco ~ rate_totale/2, serie simmetrica)
+    weaker_proj = None
+    if weaker_v is not None and rate_v_min is not None and rate_v_min < 0:
+        weaker_proj = weaker_v + (rate_v_min / 2.0) * (sync_s / 60.0)
+    recommend = False
+    reasons = []
+    if total_v is not None and total_v <= trigger_v:
+        recommend = True
+        if balanced is True:
+            reasons.append(f"V {total_v:.1f}<={trigger_v:.0f}V e banchi bilanciati")
+        elif balanced is False:
+            reasons.append(f"V {total_v:.1f}<={trigger_v:.0f}V ma SBILANCIATI (diff {abs(diff):.2f}V)")
+        else:
+            reasons.append(f"V {total_v:.1f}<={trigger_v:.0f}V")
+    if weaker_proj is not None and weaker_proj <= floor_v:
+        recommend = True
+        reasons.append(f"{weaker} ~{weaker_v:.1f}V scenderebbe a ~{weaker_proj:.1f}V (<{floor_v:.0f}V) entro {sync_s:.0f}s")
+    return {
+        "should_enel_now": recommend,
+        "reasons": reasons,
+        "total_v": round(total_v, 1) if total_v is not None else None,
+        "serie1_v": round(s1, 2) if s1 is not None else None,
+        "serie2_v": round(s2, 2) if s2 is not None else None,
+        "diff_v": round(diff, 3) if diff is not None else None,
+        "balanced": balanced,
+        "weaker_bank": weaker,
+        "weaker_v": round(weaker_v, 2) if weaker_v is not None else None,
+        "discharge_v_min": round(rate_v_min, 3) if rate_v_min is not None else None,
+        "weaker_proj_60s_v": round(weaker_proj, 2) if weaker_proj is not None else None,
+        "trigger_v": trigger_v,
+        "bank_floor_v": floor_v,
+        "enel_sync_s": sync_s,
+        "relay_real_on_v": float(_get("relay.on_v", 47.5)),
+        "note": "SHADOW: raccomanda, non pilota il rele' (reale=relay_auto_step). bank_floor 21V = stima ~20V+margine, DA VERIFICARE prima di apply.",
+    }
+
+
 def main():
     cfg = _cfg_floats()
     try:
@@ -316,7 +397,7 @@ def main():
         "config_snapshot": cfg,
     }
     recs = []
-    cap = hall = thr = fc = bal = None
+    cap = hall = thr = fc = bal = grid = None
     try:
         with db() as con:
             cap = estimate_capacity(con, cfg)
@@ -324,6 +405,7 @@ def main():
             thr = estimate_thresholds(con, cfg)
             fc = estimate_forecast(con, cfg)
             bal = estimate_balance(con)
+            grid = estimate_grid(con, cfg)
     except Exception as e:
         out["error"] = f"db: {e}"
 
@@ -379,6 +461,13 @@ def main():
             recs.append(f"Auto-bilanciamento OFF ma lo squilibrio ha toccato {bal['max_abs_diff_v']:.2f} V: valuta balance.enabled=true.")
     else:
         out["balance"] = {"note": "dati banchi insufficienti"}
+
+    if grid:
+        out["grid"] = grid
+        if grid.get("should_enel_now") and grid.get("reasons"):
+            recs.append("Rete ENEL consigliata ORA: " + grid["reasons"][0] + " (shadow).")
+    else:
+        out["grid"] = {"note": "dati rete/banchi insufficienti"}
 
     out["coulombic_efficiency"] = {
         "value": round(cfg["charge_eff"], 3),
