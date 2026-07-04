@@ -133,6 +133,24 @@ def poll_loop():
                     except Exception:
                         pass
                     _last = s
+
+                    # Banco2 STIMATO = Totale(inverter) - Banco1, per aggirare l'ADC SERIE2
+                    # (i caricatori switching iniettano rumore di modo comune sul partitore ad
+                    # alta impedenza; il totale Modbus e' a bassa impedenza -> immune). Scale
+                    # opzionali per calibrare SERIE1 e il totale sul tester.
+                    try:
+                        m2 = i2c_snapshot.get("adc_mod2") if isinstance(i2c_snapshot, dict) else None
+                        bv = s.get("battery_v")
+                        if isinstance(m2, dict) and bv is not None and _bool(_get("bank_v.derive_bank2", True), True):
+                            c1 = m2.get("SERIE1"); c2 = m2.get("SERIE2")
+                            if isinstance(c1, dict) and c1.get("value") is not None:
+                                b1 = round(float(c1["value"]) * float(_get("bank_v.serie1_scale", 1.0)), 3)
+                                b2 = round(float(bv) * float(_get("bank_v.total_scale", 1.0)) - b1, 3)
+                                c1["value"] = b1; c1["scaled_v"] = b1
+                                if isinstance(c2, dict):
+                                    c2["value"] = b2; c2["scaled_v"] = b2; c2["derived"] = True
+                    except Exception as _bve:
+                        print(f"[bankv] derive error: {_bve}", flush=True)
                     
                     with db() as con:
                         con.execute("""

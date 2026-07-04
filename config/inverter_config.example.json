@@ -51,6 +51,11 @@
     "balance_tol_pct": 10.0,
     "enel_sync_s": 60.0
   },
+  "bank_v": {
+    "derive_bank2": true,
+    "serie1_scale": 1.0042,
+    "total_scale": 1.0019
+  },
   "balance": {
     "enabled": false,
     "active_high": true,
