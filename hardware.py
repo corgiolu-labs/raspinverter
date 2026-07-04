@@ -572,15 +572,12 @@ def balance_setup():
     print(f"[balance] SETUP pins=({p1},{p2}) active_high={active_high} -> entrambi OFF", flush=True)
 
 def balance_set(bank: int):
-    """Seleziona il banco pilotando i DUE rele' INSIEME (schema sperimentale 2026-06-14, cablaggio reale).
-    Cablaggio: NC1->neg.banco1, NO1+NC2->cavo serie (M), NO2->pos.banco2.
-    => banco1 = ENTRAMBI OFF (0-0), banco2 = ENTRAMBI ON (1-1).
-    Stati misti: '1-0' (relay1 ON/relay2 OFF) = corto (innocuo su caricatore CC); '0-1'
-    (relay1 OFF/relay2 ON) = 48V sul caricatore = PERICOLOSO. L'ordine sotto fa attraversare il
-    transitorio SEMPRE per '1-0' (corto) e MAI per '0-1'.
-    relay2 = gpio_pin_bank2 = il rele' che da SOLO darebbe '0-1' (NO->positivo banco2): acceso per
-    ULTIMO, spento per PRIMO. relay1 = gpio_pin_bank1 = rele' 'esterno' (ON per primo / OFF per ultimo).
-    => invariante: relay2 e' ON solo se relay1 e' gia' ON, quindi '0-1' non si verifica mai."""
+    """Schema definitivo (2026-06, 2 CARICATORI INDIPENDENTI isolati, UN rele' per banco):
+    rele1 = gpio_pin_bank1 = ingresso 230V del caricatore del Banco1;
+    rele2 = gpio_pin_bank2 = ingresso 230V del caricatore del Banco2.
+    bank 1 -> carica Banco1 (rele1 ON, rele2 OFF); bank 2 -> carica Banco2 (rele2 ON, rele1 OFF);
+    0 -> entrambi OFF. I caricatori sono isolati e indipendenti: nessuno stato intermedio pericoloso.
+    Si accende al piu' un caricatore per volta (l'altro viene spento per primo)."""
     global BALANCE_STATE, BALANCE_SINCE, BALANCE_LAST_TOGGLE
     bank = int(bank)
     if bank == BALANCE_STATE:
@@ -592,30 +589,22 @@ def balance_set(bank: int):
     active_high = bool(cfg.get("active_high", True))
     on_level = active_high
     off_level = (not active_high)
-    relay1 = int(cfg.get("gpio_pin_bank1", 23))   # esterno: ON per primo / OFF per ultimo
-    relay2 = int(cfg.get("gpio_pin_bank2", 24))   # interno (0-1=48V da solo): ON per ultimo / OFF per primo
-    delay = float(cfg.get("switch_delay_s", 0.15))
-    if bank == 2:
-        # banco2 = ENTRAMBI ON: prima relay1 (esterno), assesta, poi relay2 -> transitorio '1-0' (corto), mai '0-1'
+    relay1 = int(cfg.get("gpio_pin_bank1", 17))   # caricatore Banco1
+    relay2 = int(cfg.get("gpio_pin_bank2", 27))   # caricatore Banco2
+    if bank == 1:
+        _gpio_write(relay2, off_level)            # spegni l'altro caricatore per primo
         _gpio_write(relay1, on_level)
-        _tb = time.monotonic()
-        time.sleep(delay)
-        _gpio_write(relay2, on_level)
-        _tc = time.monotonic()
-        _seq = f"relay1(GPIO{relay1}) ON -> relay2(GPIO{relay2}) ON"
-    else:
-        # banco1 o 0 -> ENTRAMBI OFF: prima relay2 (interno), assesta, poi relay1 -> transitorio '1-0', mai '0-1'
-        _gpio_write(relay2, off_level)
-        _tb = time.monotonic()
-        time.sleep(delay)
+    elif bank == 2:
         _gpio_write(relay1, off_level)
-        _tc = time.monotonic()
-        _seq = f"relay2(GPIO{relay2}) OFF -> relay1(GPIO{relay1}) OFF"
+        _gpio_write(relay2, on_level)
+    else:
+        _gpio_write(relay1, off_level)
+        _gpio_write(relay2, off_level)
     BALANCE_SINCE = time.monotonic() if bank in (1, 2) else 0.0
     BALANCE_STATE = bank
     BALANCE_LAST_TOGGLE = time.monotonic()
-    _lbl = "banco2 (rele 1-1)" if bank == 2 else ("banco1 (rele 0-0)" if bank == 1 else "OFF/stop (rele 0-0)")
-    print(f"[balance] SET -> {_lbl} | timing: {_seq}, gap misurato {(_tc-_tb)*1000:.1f}ms (delay set {delay*1000:.0f}ms)", flush=True)
+    _lbl = f"carica Banco{bank}" if bank in (1, 2) else "OFF (nessuna carica)"
+    print(f"[balance] SET -> {_lbl} (rele1=GPIO{relay1}, rele2=GPIO{relay2})", flush=True)
 
 def balance_manual(bank, seconds: float = 30.0):
     """Test cablaggio: forza un banco per 'seconds', poi torna all'automatico."""
