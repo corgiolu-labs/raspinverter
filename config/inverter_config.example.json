@@ -53,7 +53,7 @@
   },
   "bank_v": {
     "derive_bank2": true,
-    "serie1_scale": 1.0042,
+    "serie1_scale": 0.994,
     "total_scale": 1.0019
   },
   "balance": {
@@ -67,6 +67,8 @@
     "bank2_channel": "SERIE2",
     "start_diff_v": 0.3,
     "stop_diff_v": 0.1,
+    "pulse_seconds": 60,
+    "settle_seconds": 8,
     "max_bank_v": 28.0,
     "max_minutes": 60,
     "min_toggle_sec": 10

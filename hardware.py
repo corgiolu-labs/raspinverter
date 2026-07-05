@@ -541,11 +541,10 @@ def relay_setup():
 
 
 # ---------------------------------------------------------------------------
-# Bilanciamento banchi (SCHEMA SPERIMENTALE 2026-06-14): 1 caricatore 24V ISOLATO instradato da
-# 2 rele' SPDT. Cablaggio reale: NC1->neg.banco1, NO1+NC2->cavo serie (M), NO2->pos.banco2.
-# banco1 = ENTRAMBI OFF (0-0), banco2 = ENTRAMBI ON (1-1) (vedi balance_set). Lo stato misto '0-1'
-# (relay1 OFF / relay2 ON) mette 48V sul caricatore = VIETATO; lo stato '1-0' (corto) e' innocuo su
-# caricatore CC. L'ordine di commutazione fa passare il transitorio SEMPRE per '1-0' e MAI per '0-1'.
+# Bilanciamento banchi (schema definitivo 2026-07): 2 CARICATORI INDIPENDENTI isolati, un rele' per
+# banco (rele1=GPIO17=caricatore Banco1, rele2=GPIO27=caricatore Banco2 - vedi balance_set).
+# Misura A IMPULSI (duty-cycle): lo switching del caricatore perturba l'ADC SERIE mentre carica,
+# quindi si carica a impulsi e si MISURA solo a caricatore SPENTO (lettura pulita) - vedi balance_step.
 # Default DISATTIVATO (balance.enabled=false): abilitare dopo aver verificato il cablaggio.
 # ---------------------------------------------------------------------------
 BALANCE_STATE: int = 0          # 0=nessuno, 1=banco1 (SERIE1), 2=banco2 (SERIE2)
@@ -553,6 +552,9 @@ BALANCE_SINCE: float = 0.0      # monotonic: inizio carica del banco corrente
 BALANCE_LAST_TOGGLE: float = 0.0
 _balance_manual_until: float = 0.0   # override test cablaggio: tiene il banco fino a questo istante
 _balance_manual_bank: int = 0
+_bal_phase: str = "idle"        # duty-cycle: "idle"(misura) / "charging"(impulso) / "settle"(attesa dopo off)
+_bal_phase_until: float = 0.0   # monotonic: fine della fase corrente
+_bal_session: bool = False      # True mentre un ciclo di bilanciamento e' in corso (isteresi start/stop)
 
 def balance_setup():
     """Init GPIO dei 2 rele' di bilanciamento -> entrambi OFF (sicuro al boot)."""
@@ -624,41 +626,63 @@ def _bank_voltages(i2c):
     return _v(cfg.get("bank1_channel", "SERIE1")), _v(cfg.get("bank2_channel", "SERIE2"))
 
 def balance_step(i2c):
-    """Logica: carica il banco piu' basso finche' bilanciato/pieno/timeout. OFF se disabilitato."""
-    global BALANCE_STATE
+    """Bilanciamento a IMPULSI (duty-cycle): lo switching del caricatore perturba l'ADC SERIE mentre
+    carica, quindi si MISURA solo a caricatore SPENTO (lettura pulita), poi si carica il banco piu'
+    basso per un impulso, si spegne, si assesta e si rimisura. Isteresi start/stop; OFF se disabilitato."""
+    global BALANCE_STATE, _bal_phase, _bal_phase_until, _bal_session
     cfg = CONF.get("balance", {})
-    # Override manuale (test): tiene il banco scelto per N secondi
-    if time.monotonic() < _balance_manual_until:
+    now = time.monotonic()
+    # Override manuale (test cablaggio): tiene il banco scelto per N secondi
+    if now < _balance_manual_until:
         if BALANCE_STATE != _balance_manual_bank:
             balance_set(_balance_manual_bank)
         return
     if not bool(cfg.get("enabled", False)) or GPIO_BACKEND is None:
         if BALANCE_STATE != 0:
             balance_set(0)
+        _bal_phase = "idle"; _bal_session = False
         return
+
+    pulse_s = float(cfg.get("pulse_seconds", 60))
+    settle_s = float(cfg.get("settle_seconds", 8))
+    start_diff = float(cfg.get("start_diff_v", 0.3))
+    stop_diff = float(cfg.get("stop_diff_v", 0.1))
+    max_bank_v = float(cfg.get("max_bank_v", 28.0))
+
+    # Fase CARICA: impulso in corso -> NON leggere (lettura perturbata), tieni acceso
+    if _bal_phase == "charging":
+        if now < _bal_phase_until:
+            return
+        balance_set(0)                          # fine impulso -> spegni il caricatore
+        _bal_phase = "settle"; _bal_phase_until = now + settle_s
+        return
+    # Fase SETTLE: caricatore spento, aspetta che la lettura si pulisca
+    if _bal_phase == "settle":
+        if now < _bal_phase_until:
+            return
+        _bal_phase = "idle"                     # pronto a misurare
+
+    # Fase MISURA/DECIDI: caricatore SPENTO -> lettura pulita e affidabile
     s1, s2 = _bank_voltages(i2c)
     if s1 is None or s2 is None:
         if BALANCE_STATE != 0:
             balance_set(0)
         return
     s1 = float(s1); s2 = float(s2)
-    start_diff = float(cfg.get("start_diff_v", 0.3))
-    stop_diff = float(cfg.get("stop_diff_v", 0.1))
-    max_bank_v = float(cfg.get("max_bank_v", 28.0))
-    max_min = float(cfg.get("max_minutes", 60))
     diff = s1 - s2
-    now = time.monotonic()
-    if BALANCE_STATE != 0:
-        charging_v = s1 if BALANCE_STATE == 1 else s2
-        elapsed_min = ((now - BALANCE_SINCE) / 60.0) if BALANCE_SINCE else 0.0
-        if abs(diff) <= stop_diff or charging_v >= max_bank_v or elapsed_min >= max_min:
-            balance_set(0)
-        return
-    if abs(diff) >= start_diff:
+    thr = stop_diff if _bal_session else start_diff   # isteresi: parte a start_diff, continua fino a stop_diff
+    if abs(diff) >= thr:
         lower = 1 if s1 < s2 else 2
         lower_v = s1 if lower == 1 else s2
         if lower_v < max_bank_v:
-            balance_set(lower)
+            _bal_session = True
+            balance_set(lower)                  # accendi il caricatore del banco piu' basso
+            _bal_phase = "charging"; _bal_phase_until = now + pulse_s
+            return
+    # bilanciato o banco pieno -> chiudi il ciclo, resta spento
+    _bal_session = False
+    if BALANCE_STATE != 0:
+        balance_set(0)
 
 def balance_status(i2c=None):
     """Stato corrente per UI/endpoint."""
@@ -669,6 +693,7 @@ def balance_status(i2c=None):
     return {
         "enabled": bool(cfg.get("enabled", False)),
         "charging_bank": BALANCE_STATE,
+        "phase": _bal_phase,
         "serie1_v": s1, "serie2_v": s2,
         "diff_v": round(diff, 3) if diff is not None else None,
         "start_diff_v": float(cfg.get("start_diff_v", 0.3)),
