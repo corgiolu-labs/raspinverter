@@ -53,8 +53,8 @@
   },
   "bank_v": {
     "derive_bank2": true,
-    "serie1_scale": 0.994,
-    "total_scale": 1.0019
+    "serie1_scale": 1.0065,
+    "total_scale": 0.9907
   },
   "balance": {
     "enabled": false,
