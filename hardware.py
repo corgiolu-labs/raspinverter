@@ -541,8 +541,8 @@ def relay_setup():
 
 
 # ---------------------------------------------------------------------------
-# Bilanciamento banchi (schema definitivo 2026-07): 2 CARICATORI INDIPENDENTI isolati, un rele' per
-# banco (rele1=GPIO17=caricatore Banco1, rele2=GPIO27=caricatore Banco2 - vedi balance_set).
+# Bilanciamento banchi (schema definitivo 2026-07): 2 CARICATORI INDIPENDENTI isolati, uno SSR per
+# banco (SSR1=GPIO19=caricatore Banco1, SSR2=GPIO26=caricatore Banco2 - vedi balance_set).
 # Misura A IMPULSI (duty-cycle): lo switching del caricatore perturba l'ADC SERIE mentre carica,
 # quindi si carica a impulsi e si MISURA solo a caricatore SPENTO (lettura pulita) - vedi balance_step.
 # Default DISATTIVATO (balance.enabled=false): abilitare dopo aver verificato il cablaggio.
@@ -565,8 +565,8 @@ def balance_setup():
         return
     active_high = bool(cfg.get("active_high", True))
     off_level = (not active_high)
-    p1 = int(cfg.get("gpio_pin_bank1", 23))
-    p2 = int(cfg.get("gpio_pin_bank2", 24))
+    p1 = int(cfg.get("gpio_pin_bank1", 19))
+    p2 = int(cfg.get("gpio_pin_bank2", 26))
     _gpio_setup_output(p1, off_level)
     _gpio_setup_output(p2, off_level)
     BALANCE_STATE = 0
@@ -574,10 +574,10 @@ def balance_setup():
     print(f"[balance] SETUP pins=({p1},{p2}) active_high={active_high} -> entrambi OFF", flush=True)
 
 def balance_set(bank: int):
-    """Schema definitivo (2026-06, 2 CARICATORI INDIPENDENTI isolati, UN rele' per banco):
-    rele1 = gpio_pin_bank1 = ingresso 230V del caricatore del Banco1;
-    rele2 = gpio_pin_bank2 = ingresso 230V del caricatore del Banco2.
-    bank 1 -> carica Banco1 (rele1 ON, rele2 OFF); bank 2 -> carica Banco2 (rele2 ON, rele1 OFF);
+    """Schema definitivo (2026-07, 2 CARICATORI INDIPENDENTI isolati, UNO SSR per banco):
+    ssr1 = gpio_pin_bank1 = ingresso 230V del caricatore del Banco1;
+    ssr2 = gpio_pin_bank2 = ingresso 230V del caricatore del Banco2.
+    bank 1 -> carica Banco1 (ssr1 ON, ssr2 OFF); bank 2 -> carica Banco2 (ssr2 ON, ssr1 OFF);
     0 -> entrambi OFF. I caricatori sono isolati e indipendenti: nessuno stato intermedio pericoloso.
     Si accende al piu' un caricatore per volta (l'altro viene spento per primo)."""
     global BALANCE_STATE, BALANCE_SINCE, BALANCE_LAST_TOGGLE
@@ -591,8 +591,8 @@ def balance_set(bank: int):
     active_high = bool(cfg.get("active_high", True))
     on_level = active_high
     off_level = (not active_high)
-    relay1 = int(cfg.get("gpio_pin_bank1", 17))   # caricatore Banco1
-    relay2 = int(cfg.get("gpio_pin_bank2", 27))   # caricatore Banco2
+    relay1 = int(cfg.get("gpio_pin_bank1", 19))   # SSR caricatore Banco1
+    relay2 = int(cfg.get("gpio_pin_bank2", 26))   # SSR caricatore Banco2
     if bank == 1:
         _gpio_write(relay2, off_level)            # spegni l'altro caricatore per primo
         _gpio_write(relay1, on_level)
@@ -606,7 +606,7 @@ def balance_set(bank: int):
     BALANCE_STATE = bank
     BALANCE_LAST_TOGGLE = time.monotonic()
     _lbl = f"carica Banco{bank}" if bank in (1, 2) else "OFF (nessuna carica)"
-    print(f"[balance] SET -> {_lbl} (rele1=GPIO{relay1}, rele2=GPIO{relay2})", flush=True)
+    print(f"[balance] SET -> {_lbl} (SSR1=GPIO{relay1}, SSR2=GPIO{relay2})", flush=True)
 
 def balance_manual(bank, seconds: float = 30.0):
     """Test cablaggio: forza un banco per 'seconds', poi torna all'automatico."""
@@ -700,7 +700,7 @@ def balance_status(i2c=None):
         "stop_diff_v": float(cfg.get("stop_diff_v", 0.1)),
         "max_bank_v": float(cfg.get("max_bank_v", 28.0)),
         "manual_test_sec_left": round(manual_left, 1),
-        "gpio": [int(cfg.get("gpio_pin_bank1", 23)), int(cfg.get("gpio_pin_bank2", 24))],
+        "gpio": [int(cfg.get("gpio_pin_bank1", 19)), int(cfg.get("gpio_pin_bank2", 26))],
         "active_high": bool(cfg.get("active_high", True)),
         "available": GPIO_BACKEND is not None,
     }

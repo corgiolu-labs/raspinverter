@@ -59,8 +59,8 @@
   "balance": {
     "enabled": false,
     "active_high": true,
-    "gpio_pin_bank1": 17,
-    "gpio_pin_bank2": 27,
+    "gpio_pin_bank1": 19,
+    "gpio_pin_bank2": 26,
     "switch_delay_s": 0.15,
     "source_device": "adc_mod2",
     "bank1_channel": "SERIE1",
