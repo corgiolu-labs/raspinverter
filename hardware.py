@@ -495,7 +495,7 @@ def _gpio_cleanup():
 
 
 # ---------------------------------------------------------------------------
-# Relay control (GPIO 17 / physical pin 11). Stato letto come hardware.RELAY_STATE
+# Relay control (pin da relay.gpio_pin; 17 e' solo il default). Stato: hardware.RELAY_STATE
 # ---------------------------------------------------------------------------
 RELAY_STATE: Optional[bool] = None  # None=unknown, True=on, False=off
 RELAY_LAST_TOGGLE: float = 0.0
@@ -521,23 +521,46 @@ def relay_apply(hw_on: bool):
     RELAY_LAST_TOGGLE = time.monotonic()
 
 
-def relay_setup():
-    """Init GPIO (if available) and set relay to logical OFF."""
+def relay_forced() -> bool:
+    """relay.force_on: ENEL sempre agganciata (manutenzione pacco batterie), scavalca l'automatismo."""
+    return bool(CONF.get("relay", {}).get("force_on", False))
+
+
+def relay_force_step() -> bool:
+    """Forzatura attiva -> tiene il rele' ON (ignora soglie e min_toggle: e' un comando manuale).
+    Ritorna True se l'automatismo (relay_auto_step / F4) va saltato."""
+    if not relay_forced():
+        return False
+    if RELAY_STATE is not True:
+        relay_apply(True)
+        print("[relay] FORCE_ON attivo -> ENEL ON (automatismo sospeso)", flush=True)
+    return True
+
+
+def relay_setup(keep_state: bool = False):
+    """Init GPIO (if available) and set relay to logical OFF (ON se relay.force_on).
+    keep_state=True (re-init dopo un salvataggio config): conserva lo stato logico corrente,
+    altrimenti un "Salva" con ENEL agganciata la sgancerebbe (e tra on_v e off_v resterebbe OFF)."""
     cfg = CONF.get("relay", {})
     if GPIO_BACKEND is None or str(cfg.get("mode", "gpio")).lower() != "gpio":
         print("[relay] Setup skipped: GPIO not available or mode!=gpio", flush=True)
         return
     pin = int(cfg.get("gpio_pin", 17))
     active_high = bool(cfg.get("active_high", True))
-    off_level_high = False if active_high else True
-    ok = _gpio_setup_output(pin, off_level_high)
-
+    forced = relay_forced()   # con la forzatura parte gia' ON: nessun buco OFF->ON al riavvio
     global RELAY_STATE, RELAY_LAST_TOGGLE
-    RELAY_STATE = False
-    RELAY_LAST_TOGGLE = time.monotonic()
+    want_on = forced or (keep_state and RELAY_STATE is True)
+    initial_level_high = want_on if active_high else (not want_on)
+    ok = _gpio_setup_output(pin, initial_level_high)
+
+    if RELAY_STATE is not want_on:
+        RELAY_LAST_TOGGLE = time.monotonic()
+    RELAY_STATE = want_on
     rb = _gpio_read(pin)
+    why = "force_on" if forced else ("stato conservato" if want_on else "")
     print(f"[relay] SETUP: backend={GPIO_BACKEND} pin={pin} active_high={active_high} "
-          f"-> OFF (initial level_high={off_level_high}, setup_ok={ok}, readback={rb})", flush=True)
+          f"-> {'ON' if want_on else 'OFF'}{' (' + why + ')' if why else ''} "
+          f"(initial level_high={initial_level_high}, setup_ok={ok}, readback={rb})", flush=True)
 
 
 # ---------------------------------------------------------------------------
@@ -708,6 +731,8 @@ def balance_status(i2c=None):
 def relay_auto_step(batt_v: Optional[float]):
     """Hysteresis: on when batt_v <= on_v; off when batt_v >= off_v."""
     global RELAY_STATE
+    if relay_force_step():
+        return
     cfg = CONF.get("relay", {})
     if not bool(cfg.get("enabled", False)):
         return
@@ -805,6 +830,9 @@ def grid_control_step(battery_v, i2c=None):
     want_f4, reason, weaker_v, rate = _f4_decision(battery_v, i2c)
     GRID_CTRL.update({"f4_on": want_f4, "reason": reason, "weaker_v": weaker_v,
                       "rate_v_min": (round(rate, 3) if rate is not None else None), "applied": apply_on})
+
+    if relay_force_step():       # forzatura ENEL: ne' relay_auto_step ne' la F4 possono spegnere
+        return
 
     if not apply_on:
         relay_auto_step(battery_v)   # comportamento attuale, INVARIATO

@@ -388,8 +388,13 @@
         updateRelayStatusIndicator(null, enabled);
       });
     }
-    
-    
+
+    // Forzatura ENEL sempre ON: endpoint dedicato, si applica subito (non passa da "Salva")
+    const relayForce = el('relay_force_on');
+    if (relayForce) {
+      relayForce.addEventListener('change', () => handleRelayForce(relayForce));
+    }
+
     // Carica informazioni contatore batteria
     loadBatteryCounterInfo();
 
@@ -402,6 +407,55 @@
   }
 
   // ----------------- Handlers - OTTIMIZZATI -----------------
+  function renderRelayForce(on) {
+    const box = el('relay_force_on');
+    const wrap = el('relayForceBox');
+    const hint = el('relayForceHint');
+    if (box) box.checked = !!on;
+    if (wrap) {
+      wrap.style.background = on ? 'rgba(245,158,11,.15)' : '';
+      wrap.style.borderColor = on ? '#f59e0b' : 'rgba(148,163,184,.45)';
+    }
+    if (hint) {
+      hint.textContent = on
+        ? '⚠️ Forzatura ATTIVA: il relè ENEL resta ON e l\'automatismo è sospeso. Disattivala a fine intervento.'
+        : 'Tiene agganciato il teleruttore ENEL ignorando le soglie di tensione. Si applica subito, senza «Salva», e resta attivo anche dopo un riavvio.';
+    }
+  }
+
+  async function handleRelayForce(box) {
+    const want = box.checked;
+    const question = want
+      ? 'Forzare ENEL sempre ON?\n\nIl relè resta agganciato ignorando le soglie di tensione finché non disattivi la forzatura.'
+      : 'Disattivare la forzatura ENEL?\n\nIl relè torna al controllo automatico.';
+    if (!window.confirm(question)) { box.checked = !want; return; }
+
+    box.disabled = true;
+    try {
+      const r = await fetch('/api/relay/force', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ enabled: want })
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok || !j.ok) throw new Error(j.error || ('HTTP ' + r.status));
+      configCache = null;
+      renderRelayForce(!!j.force_on);
+      if (j.force_on) {
+        showMsg('Forzatura attiva: ENEL sempre ON.');
+      } else if (j.auto_enabled) {
+        showMsg('Forzatura disattivata: il relè torna in automatico (si sgancia quando la batteria supera la soglia di spegnimento).');
+      } else {
+        showMsg('Forzatura disattivata. Automatismo relè non abilitato: il relè resta ON, spegnilo da Diagnostica.');
+      }
+    } catch (err) {
+      renderRelayForce(!want);
+      showMsg('Forzatura ENEL non applicata: ' + err.message, false);
+    } finally {
+      box.disabled = false;
+    }
+  }
+
   async function handleSubmit(e) {
     if (e) e.preventDefault();
     
@@ -683,6 +737,7 @@
       
       // Aggiorna l'indicatore dello stato del relay
       updateRelayStatusIndicator(null, !!cfg.relay.enabled);
+      renderRelayForce(!!cfg.relay.force_on);
     }
 
     // Serial

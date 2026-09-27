@@ -97,6 +97,15 @@
               <td><input id="relay_min_toggle_sec" name="relay_min_toggle_sec" type="number" step="1" class="select" style="width:100%" /></td>
             </tr>
           </table>
+          <div id="relayForceBox" style="margin-top:12px;padding:10px 12px;border:1px solid rgba(148,163,184,.45);border-radius:10px">
+            <label for="relay_force_on" style="display:flex;align-items:center;gap:10px;font-weight:600;cursor:pointer">
+              <input id="relay_force_on" type="checkbox" />
+              <span>🔒 ENEL sempre ON (manutenzione batterie)</span>
+            </label>
+            <p id="relayForceHint" style="color:var(--muted);font-size:.82rem;margin:6px 0 0">
+              Tiene agganciato il teleruttore ENEL ignorando le soglie di tensione. Si applica subito, senza «Salva», e resta attivo anche dopo un riavvio.
+            </p>
+          </div>
           <p style="color:var(--muted);font-size:.82rem;margin-top:10px">
             ℹ️ Il comando manuale ON/OFF del relè è nella scheda <a href="/diagnostics">🔧 Diagnostica</a>.
           </p>
@@ -192,6 +201,6 @@
     </form>
 {% endblock %}
 {% block scripts %}
-<script src="/settings.mod.js?v=20260609"></script>
+<script src="/settings.mod.js?v=20260920"></script>
 <script src="/status.mod.js?v=20260606"></script>
 {% endblock %}

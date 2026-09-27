@@ -37,6 +37,7 @@ from database import (
 from hardware import (
     i2c_read_all, read_regs, _blocks, _to_signed16,
     relay_apply, relay_setup, relay_auto_step, grid_control_step,
+    relay_forced, relay_force_step,
     _gpio_setup_output, _gpio_write, _gpio_read, _gpio_cleanup, GPIO_BACKEND,
     balance_setup, balance_set, balance_manual, balance_step, balance_status,
 )
@@ -132,6 +133,13 @@ def poll_loop():
                     balance_step(LAST_I2C)
                 except Exception as _be:
                     print(f"[balance] step error: {_be}", flush=True)
+
+                # Forzatura ENEL (relay.force_on): gira ogni ciclo, anche se l'inverter non
+                # risponde al Modbus (es. pacco batterie scollegato per manutenzione)
+                try:
+                    relay_force_step()
+                except Exception as _fe:
+                    print(f"[relay] force step error: {_fe}", flush=True)
 
                 if regs:
                     s = {"timestamp": ts_now, **regs}
@@ -349,7 +357,7 @@ def history_page():
 
 @app.route("/diagnostics")
 def diagnostics_page():
-    return render_template("diagnostics.html")
+    return render_template("diagnostics.html", relay_pin=int(_get("relay.gpio_pin", 17)))
 
 @app.route("/learning")
 def learning_page():
@@ -427,7 +435,7 @@ def api_grid():
     """Decisione F4 in tempo reale (dry-run o apply) per monitoraggio/dashboard."""
     gc = dict(hardware.GRID_CTRL)
     gc.pop("_last_log", None)
-    return jsonify({"ok": True, "relay_on": hardware.RELAY_STATE, **gc})
+    return jsonify({"ok": True, "relay_on": hardware.RELAY_STATE, "force_on": relay_forced(), **gc})
 
 @app.route("/main.css")
 def main_css():
@@ -494,7 +502,8 @@ def health():
             "enabled": bool(relay_cfg.get("enabled", False)),
             "mode": str(relay_cfg.get("mode", "gpio")),
             "gpio_pin": int(relay_cfg.get("gpio_pin", 17)),
-            "state": hardware.RELAY_STATE
+            "state": hardware.RELAY_STATE,
+            "force_on": relay_forced()
         }
     })
 
@@ -596,7 +605,8 @@ def config():
                 "active_high": bool(_get("relay.active_high", True)),
                 "on_v": float(_get("relay.on_v", 47.5)),
                 "off_v": float(_get("relay.off_v", 49.0)),
-                "min_toggle_sec": int(_get("relay.min_toggle_sec", 5))
+                "min_toggle_sec": int(_get("relay.min_toggle_sec", 5)),
+                "force_on": relay_forced()
             },
             "i2c": CONF.get("i2c")
         })
@@ -645,6 +655,8 @@ def config():
         CONF["ui"]["unit"] = "kW" if str(ui["unit"]).upper()=="KW" else "W"; changed=True
 
     r = data.get("relay") or {}
+    _old_pin = int(CONF["relay"].get("gpio_pin", 17))
+    _old_active_high = bool(CONF["relay"].get("active_high", True))
     if r:
         for k in ["mode","enabled","gpio_pin","active_high","on_v","off_v","min_toggle_sec"]:
             if k in r:
@@ -665,7 +677,10 @@ def config():
         with open(tmp,"w",encoding="utf-8") as f: json.dump(CONF,f,indent=2,ensure_ascii=False)
         os.replace(tmp, str(CONFIG_PATH))
         try:
-            relay_setup()
+            # pin cambiato: il vecchio va portato a OFF, altrimenti resterebbe pilotato
+            if int(CONF["relay"].get("gpio_pin", 17)) != _old_pin and GPIO_BACKEND is not None:
+                _gpio_write(_old_pin, not _old_active_high)
+            relay_setup(keep_state=True)   # un "Salva" non deve sganciare ENEL
         except Exception:
             pass
 
@@ -724,7 +739,8 @@ def inverter():
 
     s["relay"] = {
         "enabled": bool(_get("relay.enabled", False)),
-        "state": hardware.RELAY_STATE
+        "state": hardware.RELAY_STATE,
+        "force_on": relay_forced()
     }
     
     # Include last I2C snapshot if available
@@ -753,6 +769,89 @@ def i2c_latest():
         return jsonify({"ok": True, "timestamp": ts, "i2c": payload})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
+
+def _i2c_zeroable_channels():
+    """Canali I2C azzerabili: sensori di corrente con zero_offset_mv (Hall BATT1-5, TOTBAT)."""
+    out = []
+    for dev in (CONF.get("i2c", {}) or {}).get("devices", []) or []:
+        for ch in dev.get("channels", []) or []:
+            if "zero_offset_mv" in ch and (ch.get("mv_per_amp") or ch.get("amp_per_mv")):
+                out.append((str(dev.get("name")), ch))
+    return out
+
+def _i2c_raw_samples(device: str, channel: str, n: int):
+    """Ultime n letture grezze (raw_mv, fallback mv) del canale dagli snapshot in DB."""
+    vals = []
+    with db() as con:
+        rows = con.execute("SELECT data FROM i2c_snapshots ORDER BY timestamp DESC LIMIT ?", (int(n),)).fetchall()
+    for r in rows:
+        try:
+            d = json.loads(r["data"] if isinstance(r, sqlite3.Row) else r[0])
+            c = (d.get(device) or {}).get(channel) or {}
+            v = c.get("raw_mv", c.get("mv"))
+            if v is not None:
+                vals.append(float(v))
+        except Exception:
+            continue
+    return vals
+
+@app.route("/api/i2c/zero", methods=["GET", "POST"])
+def i2c_zero():
+    """Azzeramento dei sensori di corrente Hall SENZA riavviare il servizio.
+    I sensori Hall (WCS1800 e simili) spostano lo zero con temperatura e alimentazione:
+    con una batteria scollegata il canale mostra una corrente che non c'e' (27/09/2026: BATT1
+    +1.4 A a circuito aperto). GET = elenco canali con zero attuale, lettura grezza e corrente.
+    POST {device, channel, samples?} = nuovo zero_offset_mv = media delle ultime letture grezze
+    (default 12 snapshot ~ 1 min). Rifiuta se la lettura non e' stabile (corrente che scorre?).
+    Effetto immediato: hardware.i2c_read_all legge i canali da CONF ad ogni ciclo. Config salvata."""
+    chans = _i2c_zeroable_channels()
+    if request.method == "GET":
+        last = LAST_I2C or {}
+        items = []
+        for dev_name, ch in chans:
+            name = str(ch.get("name"))
+            live = ((last.get(dev_name) or {}).get(name) or {}) if isinstance(last, dict) else {}
+            items.append({
+                "device": dev_name, "channel": name,
+                "zero_offset_mv": ch.get("zero_offset_mv"),
+                "mv_per_amp": ch.get("mv_per_amp"), "amp_per_mv": ch.get("amp_per_mv"),
+                "raw_mv": live.get("raw_mv", live.get("mv")), "current_a": live.get("current_a"),
+            })
+        return jsonify({"ok": True, "channels": items})
+
+    body = request.get_json(silent=True) or {}
+    device = str(body.get("device", "")); channel = str(body.get("channel", ""))
+    n = max(3, min(120, int(body.get("samples", 12) or 12)))
+    target = next((ch for d, ch in chans if d == device and str(ch.get("name")) == channel), None)
+    if target is None:
+        return jsonify({"ok": False, "error": f"canale non azzerabile: {device}/{channel}"}), 400
+    vals = _i2c_raw_samples(device, channel, n)
+    if len(vals) < 3:
+        return jsonify({"ok": False, "error": "letture insufficienti (servono almeno 3 snapshot)"}), 400
+    mean = sum(vals) / len(vals)
+    spread = max(vals) - min(vals)
+    # ampiezza massima ammessa: ~0.5 A equivalenti (la corrente deve essere davvero zero)
+    if target.get("mv_per_amp"):
+        max_spread = 0.5 * abs(float(target["mv_per_amp"]))
+    else:
+        max_spread = 0.5 / abs(float(target["amp_per_mv"]))
+    if spread > max_spread:
+        return jsonify({"ok": False, "error": f"lettura non stabile ({spread:.1f} mV su {len(vals)} campioni): "
+                                              "il circuito e' davvero aperto?", "spread_mv": round(spread, 2)}), 409
+    old = target.get("zero_offset_mv")
+    target["zero_offset_mv"] = round(mean, 1)
+    try:
+        tmp = str(CONFIG_PATH) + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(CONF, f, indent=2, ensure_ascii=False)
+        os.replace(tmp, str(CONFIG_PATH))
+    except Exception as e:
+        target["zero_offset_mv"] = old
+        return jsonify({"ok": False, "error": f"save: {e}"}), 500
+    print(f"[i2c] ZERO {device}/{channel}: {old} -> {target['zero_offset_mv']} mV "
+          f"(media di {len(vals)} campioni, ampiezza {spread:.1f} mV)", flush=True)
+    return jsonify({"ok": True, "device": device, "channel": channel, "old_zero_mv": old,
+                    "new_zero_mv": target["zero_offset_mv"], "samples": len(vals), "spread_mv": round(spread, 2)})
 
 @app.route("/api/i2c/history")
 def i2c_history():
@@ -1305,8 +1404,35 @@ def relay_on():
 @app.route("/api/relay/off", methods=["POST"])
 def relay_off():
     cfg = CONF.get("relay", {})
+    if relay_forced():
+        # altrimenti il ciclo di poll lo riaccenderebbe entro pochi secondi (OFF->ON sul teleruttore)
+        return jsonify({"ok": False, "state": hardware.RELAY_STATE, "force_on": True,
+                        "error": "Forzatura ENEL attiva: disattivala nelle Impostazioni per spegnere il rele'"}), 409
     relay_apply(False)
     return jsonify({"ok": True, "relay": "off"})
+
+@app.route("/api/relay/force", methods=["GET", "POST"])
+def relay_force():
+    """relay.force_on: ENEL sempre agganciata (manutenzione pacco batterie). GET = stato;
+    POST {enabled} imposta, persiste in config (atomico) e applica subito. Al rilascio il rele'
+    resta ON e torna all'automatismo, che lo spegne da solo quando V >= off_v."""
+    rc = CONF.setdefault("relay", {})
+    if request.method == "POST":
+        body = request.get_json(silent=True) or {}
+        if "enabled" not in body:
+            return jsonify({"ok": False, "error": "campo 'enabled' mancante"}), 400
+        rc["force_on"] = _bool(body.get("enabled"))
+        try:
+            tmp = str(CONFIG_PATH) + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(CONF, f, indent=2, ensure_ascii=False)
+            os.replace(tmp, str(CONFIG_PATH))
+        except Exception as e:
+            return jsonify({"ok": False, "error": f"save: {e}"}), 500
+        print(f"[relay] FORCE_ON -> {rc['force_on']} (da API)", flush=True)
+        relay_force_step()
+    return jsonify({"ok": True, "force_on": relay_forced(), "state": hardware.RELAY_STATE,
+                    "auto_enabled": bool(rc.get("enabled", False))})
 
 @app.route("/api/relay/state", methods=["GET", "POST"])
 def relay_state():

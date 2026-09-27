@@ -19,7 +19,7 @@
     <!-- Relè -->
     <section class="cards-row">
       <div class="card">
-        <h3>🔌 Relè (GPIO 17)</h3>
+        <h3>🔌 Relè ENEL (GPIO <span id="relayPin">{{ relay_pin }}</span>)</h3>
         <p class="warn">⚠️ ON/OFF attivano fisicamente il relè.</p>
         <div class="diag-row">
           <button id="relayOn" class="btn">Accendi (ON)</button>
@@ -75,6 +75,18 @@
       </div>
     </section>
 
+    <!-- Azzeramento sensori di corrente (Hall) -->
+    <section class="cards-row">
+      <div class="card">
+        <h3>🎯 Azzeramento sensori di corrente</h3>
+        <p class="warn">⚠️ Azzera SOLO con il circuito di quel sensore aperto (batteria scollegata, 0 A reali). I sensori Hall spostano lo zero con temperatura e alimentazione: se una batteria scollegata "mostra" corrente, è l'offset. Effetto immediato, senza riavvio.</p>
+        <table id="zeroTable">
+          <tr><th>Canale</th><th>Zero (mV)</th><th>Lettura (mV)</th><th>Corrente</th><th></th></tr>
+        </table>
+        <div id="zeroOut" class="diag-out">—</div>
+      </div>
+    </section>
+
     <!-- Server -->
     <section class="cards-row">
       <div class="card">
@@ -105,6 +117,8 @@
     function relayState(body){
       let st = null;
       if (body && typeof body === 'object') st = (body.state !== undefined) ? body.state : (body.relay ? body.relay.state : null);
+      // pin reale dalla config (la pagina puo' arrivare dalla cache offline)
+      if (body && Number.isInteger(body.gpio_pin) && $('relayPin')) $('relayPin').textContent = body.gpio_pin;
       const pill = $('relayPill');
       if (st === true)  { pill.className = 'pill on';  pill.textContent = 'stato: ON'; }
       else if (st === false) { pill.className = 'pill off'; pill.textContent = 'stato: OFF'; }
@@ -141,6 +155,32 @@
 
     // --- I2C ---
     $('i2cRead').addEventListener('click', async () => show('i2cRaw', (await api('/api/i2c/latest')).body));
+
+    // --- Azzeramento sensori di corrente (zero_offset_mv) ---
+    function zeroRender(j){
+      const t = $('zeroTable'); if (!t || !j || !j.channels) return;
+      while (t.rows.length > 1) t.deleteRow(1);
+      j.channels.forEach(c => {
+        const tr = t.insertRow();
+        const raw = (c.raw_mv == null) ? '—' : Number(c.raw_mv).toFixed(1);
+        const cur = (c.current_a == null) ? '—' : Number(c.current_a).toFixed(2) + ' A';
+        tr.innerHTML = '<td>' + c.channel + ' <small style="color:var(--muted)">' + c.device + '</small></td>' +
+                       '<td>' + (c.zero_offset_mv == null ? '—' : c.zero_offset_mv) + '</td><td>' + raw + '</td><td>' + cur + '</td><td></td>';
+        const b = document.createElement('button'); b.className = 'btn btn--secondary'; b.textContent = 'Azzera';
+        b.addEventListener('click', () => zeroPost(c));
+        tr.cells[4].appendChild(b);
+      });
+    }
+    function zeroRefresh(){ api('/api/i2c/zero').then(r => zeroRender(r.body)).catch(() => {}); }
+    function zeroPost(c){
+      const raw = (c.raw_mv == null) ? '?' : Number(c.raw_mv).toFixed(1);
+      if (!confirm('Azzerare ' + c.channel + '?\nIl circuito di ' + c.channel + ' deve essere APERTO (0 A reali).\nZero: ' + c.zero_offset_mv + ' mV -> circa ' + raw + ' mV (media dell\'ultimo minuto).')) return;
+      show('zeroOut', 'azzero ' + c.channel + '…');
+      fetch('/api/i2c/zero', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({device: c.device, channel: c.channel, samples: 12}) })
+        .then(r => r.json()).then(j => { show('zeroOut', j); zeroRefresh(); })
+        .catch(e => show('zeroOut', 'errore: ' + e));
+    }
+    zeroRefresh(); setInterval(zeroRefresh, 5000);
 
     // --- Server ---
     $('ping').addEventListener('click', async () => show('maintOut', (await api('/api/test')).body));
