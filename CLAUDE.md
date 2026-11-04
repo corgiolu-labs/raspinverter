@@ -25,9 +25,11 @@ Il più stabile è **Tailscale**: `ssh raspynverter@100.74.218.113`, dashboard s
 `https://raspynverter.tailb0ef4c.ts.net`. Via cavo/ICS è `.222`, su Wi-Fi di casa
 `192.168.10.83`, su Ethernet riservato `192.168.10.50`.
 
-**La chiave SSH funziona, `sudo` no**: chiede password e da sessione non locale polkit
-rifiuta `nmcli con add/down`. Riavvii del servizio e modifiche di rete **le fa
-l'utente** — preparare il comando pronto, non tentare di aggirare.
+**La chiave SSH funziona.** `sudo -n systemctl restart inverter.service` funziona
+**senza password**: `/etc/sudoers.d/inverter-deploy` concede NOPASSWD per start/stop/
+restart/daemon-reload **di quella sola unit**. Tutto il resto (`sudo reboot`, file di
+sistema) chiede la password, e da sessione non locale polkit rifiuta comunque
+`nmcli con add/down`: le modifiche di rete **le fa l'utente**.
 
 ## Servizi
 
@@ -53,7 +55,20 @@ copia del 2026 fatta così è risultata troncata e corrotta — `archive`,
 recuperabile un solo giorno. È stata buttata il 04/11/2026.
 
 Per un backup valido: fermare il servizio, **oppure** usare `sqlite3 .backup` / l'API
-di backup online di SQLite. Mai `cp` sul file vivo.
+di backup online di SQLite. Mai `cp` sul file vivo. Sul Pi c'e' `~/backup_db.py`, che
+fa lo snapshot con l'API, lo valida con `integrity_check` **prima** di tenerlo, lo
+comprime e ne ruota tre; gira da cron alle 02:30, dopo la manutenzione delle 02:00.
+
+Il VACUUM scrive tutto nel WAL: dopo un'archiviazione con `vacuum=1` il file principale
+e' piccolo ma il `-wal` resta grosso finche' non si fa
+`pragma wal_checkpoint(TRUNCATE)`.
+
+## `i2c_snapshots` si pota, non si conserva
+
+Serve solo al grafico del bilanciamento tensioni **del giorno corrente**. Non potarla
+e' costato un DB da 2,78 GB con 2,25 milioni di righe (novembre 2026). Oggi
+`I2C_RETENTION_DAYS = 14` in `database.py`, applicata da `_archive_compute_and_apply`:
+non allungare la finestra senza un motivo, il Pi ha una SD.
 
 ## `old/`
 
