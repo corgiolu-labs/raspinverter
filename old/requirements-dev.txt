@@ -1,4 +1,0 @@
-# Dipendenze opzionali per sviluppo / esecuzione test locale.
-# Installazione su Raspberry Pi in produzione: in genere solo requirements.txt
-#
-# I test inclusi in tests/ usano la sola standard library (`unittest`).

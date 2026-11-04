@@ -17,9 +17,3 @@ config/inverter_config.json
 # Log
 *.log
 
-# Deroga: storico reale 2025 archiviato in old/ (le regole *.db sopra valgono
-# per il runtime, non per questo snapshot che vogliamo conservare)
-!old/storico-2025/
-!old/storico-2025/*.db
-!old/storico-2025/*.db-wal
-!old/storico-2025/*.db-shm
