@@ -102,6 +102,23 @@ def _db_files_size_bytes() -> int:
     return total
 
 
+# Ritenzione degli snapshot I2C grezzi. Servono solo al grafico del bilanciamento
+# del giorno e a learn.estimate_balance(), che guarda indietro 7 giorni: 14 e' doppio
+# margine. Senza potatura la tabella cresce ~0,5 GB/mese (una riga JSON ogni 5 s) ed
+# e' quella che aveva portato il database a 2,78 GB nel novembre 2026.
+I2C_RETENTION_DAYS = 14
+
+
+def _prune_i2c_snapshots(con, days: int = I2C_RETENTION_DAYS, apply: bool = True) -> Dict[str, Any]:
+    """Cancella gli snapshot I2C piu' vecchi di `days` giorni. Ritorna quante righe."""
+    from datetime import datetime as _dt, timedelta as _td
+    cutoff = (_dt.now() - _td(days=days)).strftime("%Y-%m-%d %H:%M:%S")
+    n = con.execute("SELECT COUNT(*) FROM i2c_snapshots WHERE timestamp < ?", (cutoff,)).fetchone()[0]
+    if apply and n:
+        con.execute("DELETE FROM i2c_snapshots WHERE timestamp < ?", (cutoff,))
+    return {"i2c_snapshots_to_delete": int(n or 0), "i2c_retention_days": int(days)}
+
+
 def _archive_compute_and_apply(cutoff: str, apply: bool) -> Dict[str, Any]:
     """Calcola righe da archiviare/cancellare; se apply=True esegue. Ritorna riepilogo."""
     summary: Dict[str, Any] = {}
@@ -140,6 +157,12 @@ def _archive_compute_and_apply(cutoff: str, apply: bool) -> Dict[str, Any]:
                     VALUES (?,?,?,?,?,?)
                 """, (r["day"], r["pv_Wh"], r["load_Wh"], r["grid_Wh"], r["batt_in_Wh"], r["batt_out_Wh"]))
             con.execute("DELETE FROM samples WHERE timestamp < ?", (cutoff,))
+            con.commit()
+
+        # Gli snapshot I2C hanno una ritenzione propria, indipendente dal cutoff dei
+        # campioni: non vengono aggregati, si cancellano e basta.
+        summary.update(_prune_i2c_snapshots(con, apply=apply))
+        if apply:
             con.commit()
     return summary
 

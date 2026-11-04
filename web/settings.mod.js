@@ -518,12 +518,13 @@
       const pre = await r0.json();
       const days0 = pre.days_to_archive ?? 0;
       const mins0 = pre.minutes_to_delete ?? 0;
-      if (progressEl) progressEl.textContent = `Da archiviare: giorni=${days0}, campioni da cancellare=${mins0}...`;
+      const i2c0  = pre.i2c_snapshots_to_delete ?? 0;
+      if (progressEl) progressEl.textContent = `Da archiviare: giorni=${days0}, campioni=${mins0}, snapshot I2C=${i2c0}...`;
       if (!pre.ok) {
         showMsg('❌ Errore dry-run: ' + (pre.error || 'sconosciuto'), false);
         return;
       }
-      if (mins0 === 0) {
+      if (mins0 === 0 && i2c0 === 0) {
         showMsg('✅ Niente da archiviare (giorno corrente escluso).', true);
         if (progressEl) progressEl.textContent = 'Nessuna modifica necessaria.';
         return;
@@ -537,7 +538,7 @@
       const result = await r.json();
       const delta = (Number(result.size_delta_bytes || 0)/1024/1024).toFixed(2);
       if (result.ok) {
-        showMsg(`✅ Archiviazione completata: giorni=${days0}, campioni cancellati=${mins0}, Δ spazio=${delta} MB`, true);
+        showMsg(`✅ Archiviazione completata: giorni=${days0}, campioni cancellati=${mins0}, snapshot I2C=${i2c0}, Δ spazio=${delta} MB`, true);
         if (progressEl) progressEl.textContent = `Completata. Riduzione stimata: ${delta} MB`;
       } else {
         showMsg('❌ Errore: ' + (result.error || 'sconosciuto'), false);
