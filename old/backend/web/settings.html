@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#0f172a" />
+  <title>Impostazioni Inverter</title>
+  <link rel="stylesheet" href="/main.css?v=20251128" />
+  <link rel="manifest" href="/manifest.webmanifest" />
+  <link rel="icon" href="/icons/icon.svg" type="image/svg+xml" />
+  <link rel="apple-touch-icon" href="/icons/icon-192.png" />
+</head>
+<body>
+  <!-- Header / Topbar -->
+  <header class="app-header">
+    <div class="topbar">
+      <div class="title">Impostazioni</div>
+      <a class="btn btn--ghost" href="/" aria-label="Torna alla dashboard">Dashboard</a>
+    </div>
+
+    <div class="container header-bar">
+      <h1 class="brand">Impostazioni Inverter</h1>
+      <div class="toolbar">
+        <a href="/" class="btn btn--secondary" aria-label="Torna alla dashboard">Torna alla Dashboard</a>
+      </div>
+    </div>
+
+    <div id="msg" class="banner" role="status" aria-live="polite" hidden></div>
+  </header>
+
+  <main class="container">
+          <form id="configForm" aria-label="Configurazione inverter">
+      <!-- TUTTE le card nella stessa row: si allineano e vanno in griglia fluida -->
+      <section class="cards-row">
+        <!-- Batteria -->
+        <article class="card">
+          <h3>Batteria</h3>
+          <table class="kv" style="width:100%">
+            <tr>
+              <td><label for="b_type">Tipo</label></td>
+              <td>
+                <select id="b_type" name="b_type" class="select" style="width:100%">
+                  <option value="lifepo4">LiFePO4</option>
+                  <option value="agm">AGM</option>
+                  <option value="gel">GEL</option>
+                  <option value="liion">Li-Ion</option>
+                </select>
+              </td>
+            </tr>
+            <tr>
+              <td><label for="b_vnom">Tensione nominale (V)</label></td>
+              <td><input id="b_vnom" name="b_vnom" type="number" step="0.1" class="select" style="width:100%"></td>
+            </tr>
+            <tr>
+              <td><label for="b_ah">Capacità nominale (Ah)</label></td>
+              <td><input id="b_ah" name="b_ah" type="number" step="1" class="select" style="width:100%"></td>
+            </tr>
+            <tr>
+              <td><label for="b_capacity_wh">Capacità (Wh)</label></td>
+              <td><span id="b_capacity_wh_display" style="color: var(--muted);">Calcolato automaticamente</span></td>
+            </tr>
+            <tr>
+              <td><label for="net_reset_voltage">Soglia reset batteria netta (V)</label></td>
+              <td><input id="net_reset_voltage" name="net_reset_voltage" type="number" step="0.1" class="select" style="width:100%" placeholder="46.0"></td>
+            </tr>
+            <tr>
+              <td><label for="soc_method">Metodo SOC</label></td>
+              <td>
+                <select id="soc_method" name="soc_method" class="select" style="width:100%">
+                  <option value="energy_balance">Bilancio Energetico (Raccomandato)</option>
+                  <option value="voltage_based">Basato su Tensione (Legacy)</option>
+                </select>
+              </td>
+            </tr>
+            <tr id="soc_voltage_row" style="display: none;">
+              <td><label for="soc_vmax">SOC Vmax (V)</label></td>
+              <td><input id="soc_vmax" name="soc_vmax" type="number" step="0.1" class="select" style="width:100%"></td>
+            </tr>
+            <tr id="soc_voltage_row2" style="display: none;">
+              <td><label for="soc_vmin">SOC Vmin (V)</label></td>
+              <td><input id="soc_vmin" name="soc_vmin" type="number" step="0.1" class="select" style="width:100%"></td>
+            </tr>
+            <tr id="soc_energy_row">
+              <td><label for="soc_reset_voltage">Tensione Reset (V)</label></td>
+              <td><input id="soc_reset_voltage" name="soc_reset_voltage" type="number" step="0.1" value="44.0" class="select" style="width:100%"></td>
+            </tr>
+
+          </table>
+        </article>
+
+        <!-- Interfaccia -->
+        <article class="card">
+          <h3>Interfaccia</h3>
+          <table class="kv" style="width:100%">
+            <tr>
+              <td><label>Unià potenza</label></td>
+              <td>
+                <span style="color: var(--muted);">kWh (fisso)</span>
+              </td>
+            </tr>
+          </table>
+        </article>
+
+        <!-- Relè -->
+        <article class="card">
+          <h3>Relè</h3>
+          <table class="kv" style="width:100%">
+            <tr>
+              <td><label for="relay_mode">Modalità</label></td>
+              <td>
+                <select id="relay_mode" name="relay_mode" class="select" style="width:100%">
+                  <option value="gpio">GPIO (Raspberry)</option>
+                  <option value="none">Disabilitato</option>
+                </select>
+              </td>
+            </tr>
+            <tr>
+              <td><label for="relay_enabled">Abilitato</label></td>
+              <td><input id="relay_enabled" name="relay_enabled" type="checkbox" /></td>
+            </tr>
+            <tr>
+              <td><label for="relay_gpio_pin">GPIO (BCM)</label></td>
+              <td><input id="relay_gpio_pin" name="relay_gpio_pin" type="number" step="1" class="select" style="width:100%" placeholder="17" /></td>
+            </tr>
+            <tr>
+              <td><label for="relay_active_high">Attivo alto</label></td>
+              <td><input id="relay_active_high" name="relay_active_high" type="checkbox" /></td>
+            </tr>
+            <tr>
+              <td><label for="relay_on_v">Accensione (V)</label></td>
+              <td><input id="relay_on_v" name="relay_on_v" type="number" step="0.1" class="select" style="width:100%" /></td>
+            </tr>
+            <tr>
+              <td><label for="relay_off_v">Spegnimento (V)</label></td>
+              <td><input id="relay_off_v" name="relay_off_v" type="number" step="0.1" class="select" style="width:100%" /></td>
+            </tr>
+            <tr>
+              <td><label for="relay_min_toggle_sec">Min. toggle (s)</label></td>
+              <td><input id="relay_min_toggle_sec" name="relay_min_toggle_sec" type="number" step="1" class="select" style="width:100%" /></td>
+            </tr>
+          </table>
+
+          <!-- Indicatore stato relay -->
+          <div id="relayStatus" style="margin-top:12px;padding:8px;border-radius:6px;background:#f1f5f9;border:1px solid #e2e8f0;text-align:center;font-size:14px;color:#64748b;">
+            <span id="relayStatusText">Stato relay: Sconosciuto</span>
+          </div>
+          
+          <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap">
+            <button id="btnRelayOn" class="btn btn--secondary" type="button">Forza ON</button>
+            <button id="btnRelayOff" class="btn btn--secondary" type="button">Forza OFF</button>
+            <button id="btnRelayState" class="btn btn--secondary" type="button">Stato</button>
+          </div>
+        </article>
+
+        <!-- Serial -->
+        <article class="card">
+          <h3>Comunicazione Serial</h3>
+          <table class="kv" style="width:100%">
+            <tr>
+              <td><label for="serial_port">Porta</label></td>
+              <td><input id="serial_port" name="serial_port" type="text" class="select" style="width:100%" placeholder="/dev/serial0" /></td>
+            </tr>
+            <tr>
+              <td><label for="serial_baudrate">Baudrate</label></td>
+              <td>
+                <select id="serial_baudrate" name="serial_baudrate" class="select" style="width:100%">
+                  <option value="9600">9600</option>
+                  <option value="19200">19200</option>
+                  <option value="38400">38400</option>
+                  <option value="57600">57600</option>
+                  <option value="115200">115200</option>
+                </select>
+              </td>
+            </tr>
+            <tr>
+              <td><label for="serial_parity">Parità</label></td>
+              <td>
+                <select id="serial_parity" name="serial_parity" class="select" style="width:100%">
+                  <option value="N">Nessuna</option>
+                  <option value="E">Pari</option>
+                  <option value="O">Dispari</option>
+                </select>
+              </td>
+            </tr>
+            <tr>
+              <td><label for="serial_stopbits">Stop Bits</label></td>
+              <td>
+                <select id="serial_stopbits" name="serial_stopbits" class="select" style="width:100%">
+                  <option value="1">1</option>
+                  <option value="2">2</option>
+                </select>
+              </td>
+            </tr>
+            <tr>
+              <td><label for="serial_bytesize">Byte Size</label></td>
+              <td>
+                <select id="serial_bytesize" name="serial_bytesize" class="select" style="width:100%">
+                  <option value="8">8</option>
+                  <option value="7">7</option>
+                </select>
+              </td>
+            </tr>
+            <tr>
+              <td><label for="serial_timeout">Timeout (s)</label></td>
+              <td><input id="serial_timeout" name="serial_timeout" type="number" step="0.1" min="0.1" max="10" class="select" style="width:100%" value="1.0" /></td>
+            </tr>
+            <tr>
+              <td><label for="serial_unit_id">Unit ID</label></td>
+              <td><input id="serial_unit_id" name="serial_unit_id" type="number" step="1" min="1" max="247" class="select" style="width:100%" value="1" /></td>
+            </tr>
+          </table>
+        </article>
+
+        <!-- Polling -->
+        <article class="card">
+          <h3>Polling</h3>
+          <table class="kv" style="width:100%">
+            <tr>
+              <td><label for="poll_interval_sec">Intervallo (s)</label></td>
+              <td><input id="poll_interval_sec" name="poll_interval_sec" type="number" step="1" min="1" max="60" class="select" style="width:100%" value="5" /></td>
+            </tr>
+          </table>
+        </article>
+      </section>
+
+      <!-- Azioni -->
+      <section class="chart-wide">
+        <div class="card totals-card">
+          <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:center">
+            <button id="btnSave" class="btn" type="submit">💾 Salva Configurazione</button>
+            <button id="btnLoad" class="btn btn--secondary" type="button">📂 Carica Impostazioni</button>
+            <button id="btnArchive" class="btn btn--danger" type="button"
+                    title="Archivia i dati più vecchi di 30 giorni e pulisci i campioni minuti">
+              🗄️ Archivia &amp; Pulisci
+            </button>
+          </div>
+          <div style="margin-top:12px">
+            <span id="saveHint" class="badge" style="opacity:.8">Le modifiche vengono salvate su file</span>
+          </div>
+          
+          <!-- Contatori Batteria -->
+          <div style="margin-top:16px;padding:16px;background:#f8fafc;border-radius:8px;border:1px solid #e2e8f0;">
+            <h4 style="margin:0 0 12px 0;color:#334155;">Contatori Batteria</h4>
+            <div id="batteryCounterInfo" style="margin-bottom:12px;font-size:14px;color:#64748b;">
+              Caricamento informazioni contatore...
+            </div>
+            <button id="btnBatteryReset" class="btn btn--danger" type="button" style="font-size:14px;">
+              🔄 Azzera Contatore Batteria Netta
+            </button>
+          </div>
+
+          <!-- Avanzamento Archiviazione -->
+          <div id="archiveProgress" style="margin-top:16px;font-size:14px;color:#94a3b8;"></div>
+        </div>
+      </section>
+    </form>
+  </main>
+
+  <footer class="container foot">
+    <small>Impostazioni persistenti su file di configurazione</small>
+  </footer>
+
+  <script src="/settings.mod.js?v=20251128"></script>
+</body>
+</html>

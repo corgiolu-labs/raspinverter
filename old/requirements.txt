@@ -1,0 +1,16 @@
+# Backend (Raspberry Pi / server)
+flask>=2.3
+flask-compress>=1.14
+pymodbus>=3.0
+pyserial>=3.5
+minimalmodbus>=2.0.0
+
+# Optional hardware / Pi
+# smbus2>=0.4
+# RPi.GPIO>=0.7; platform_machine == "aarch64" or platform_machine == "armv7l"
+# lgpio>=0.2; platform_machine == "aarch64"
+
+# Scripts: auto_graph_generator.py
+matplotlib>=3.7
+seaborn>=0.13
+pandas>=2.0

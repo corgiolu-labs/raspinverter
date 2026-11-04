@@ -1,0 +1,956 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#0f172a" />
+  <title>Dashboard Analisi Intelligente - Inverter</title>
+  <link rel="stylesheet" href="/main.css?v=20251128" />
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <style>
+    /* Stili specifici per analisi - estendono main.css */
+    .metric-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 16px;
+      margin: 16px 0;
+    }
+    
+    .metric-item {
+      background: rgba(255,255,255,0.05);
+      padding: 16px;
+      border-radius: 8px;
+      text-align: center;
+      border: 1px solid rgba(255,255,255,0.1);
+    }
+    
+    .metric-value {
+      font-size: 1.5rem;
+      font-weight: bold;
+      color: var(--accent);
+      margin-bottom: 8px;
+    }
+    
+    .metric-label {
+      color: var(--muted);
+      font-size: 0.9rem;
+    }
+    
+    .sub-section {
+      margin: 20px 0;
+      padding: 16px;
+      background: rgba(255,255,255,0.02);
+      border-radius: 8px;
+      border: 1px solid rgba(255,255,255,0.05);
+    }
+    
+    .sub-section h4 {
+      margin: 0 0 16px 0;
+      color: var(--accent);
+      font-size: 1rem;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    
+    .seasonal-chart {
+      height: 200px;
+      margin: 16px 0;
+      max-height: 200px;
+    }
+    
+    /* 🎯 Grafico responsive per mobile */
+    @media (max-width: 768px) {
+      .seasonal-chart {
+        height: 150px; /* ✅ Ridotto per mobile */
+        max-height: 150px;
+        margin: 12px 0;
+      }
+    }
+    
+    @media (max-width: 360px) { /* Galaxy A16 */
+      .seasonal-chart {
+        height: 120px; /* ✅ Ultra-compatto per Galaxy A16 */
+        max-height: 120px;
+        margin: 8px 0;
+      }
+    }
+    
+    /* Colori tematici usando variabili CSS esistenti */
+    .theme-card[data-theme="photovoltaic"] { border-left-color: var(--c-pv); }
+    .theme-card[data-theme="battery"] { border-left-color: var(--c-batt); }
+    .theme-card[data-theme="grid"] { border-left-color: var(--c-grid); }
+    .theme-card[data-theme="household"] { border-left-color: var(--c-load); }
+    .theme-card[data-theme="monitoring"] { border-left-color: var(--error); }
+    .theme-card[data-theme="environmental"] { border-left-color: var(--primary); }
+    
+    /* Stili per anomalie - estendono main.css */
+    .anomaly-item {
+      background: rgba(239, 68, 68, 0.1);
+      border: 1px solid rgba(239, 68, 68, 0.3);
+      padding: 12px;
+      border-radius: 8px;
+      margin: 8px 0;
+    }
+    
+    .anomaly-high {
+      border-color: rgba(239, 68, 68, 0.6);
+      background: rgba(239, 68, 68, 0.15);
+    }
+    
+    /* Stili per input date - estendono main.css */
+    .date-picker {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 8px 12px;
+      border-radius: 8px;
+      margin: 16px 0;
+    }
+    
+    /* 🎯 ADATTIVITÀ COMPLETA PER MOBILE (Galaxy A16) */
+    
+    /* Mobile First - Base styles per piccoli schermi */
+    @media (max-width: 768px) {
+      .metric-grid {
+        grid-template-columns: 1fr; /* ✅ Una colonna su mobile */
+        gap: 12px;
+        margin: 12px 0;
+      }
+      
+      .metric-item {
+        padding: 12px; /* ✅ Ridotto per mobile */
+        margin: 0;
+      }
+      
+      .metric-value {
+        font-size: 1.2rem; /* ✅ Ridotto per mobile */
+        margin-bottom: 6px;
+      }
+      
+      .metric-label {
+        font-size: 0.8rem; /* ✅ Ridotto per mobile */
+      }
+      
+      .sub-section {
+        margin: 16px 0;
+        padding: 12px; /* ✅ Ridotto per mobile */
+      }
+      
+      .sub-section h4 {
+        font-size: 0.9rem; /* ✅ Ridotto per mobile */
+        margin-bottom: 12px;
+      }
+      
+      /* Header ottimizzato per mobile */
+      .header-bar .toolbar {
+        flex-direction: column;
+        gap: 8px;
+        align-items: stretch;
+      }
+      
+      .header-bar .toolbar .btn {
+        width: 100%;
+        margin: 0;
+      }
+      
+      /* Date picker ottimizzato per mobile */
+      .date-picker {
+        width: 100%;
+        padding: 10px;
+        font-size: 16px; /* ✅ Previene zoom su iOS */
+      }
+      
+      /* Bottoni ottimizzati per mobile */
+      .toolbar {
+        flex-direction: column;
+        gap: 8px;
+      }
+      
+      .toolbar .btn {
+        width: 100%;
+        padding: 12px;
+        font-size: 16px; /* ✅ Previene zoom su iOS */
+      }
+    }
+    
+    /* Tablet - Stili intermedi */
+    @media (min-width: 769px) and (max-width: 1024px) {
+      .metric-grid {
+        grid-template-columns: repeat(2, 1fr); /* ✅ Due colonne su tablet */
+        gap: 14px;
+      }
+      
+      .metric-item {
+        padding: 14px;
+      }
+      
+      .metric-value {
+        font-size: 1.3rem;
+      }
+    }
+    
+    /* Desktop - Stili completi */
+    @media (min-width: 1025px) {
+      .metric-grid {
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        gap: 16px;
+      }
+      
+      .metric-item {
+        padding: 16px;
+      }
+      
+      .metric-value {
+        font-size: 1.5rem;
+      }
+    }
+    
+    /* 🎯 OTTIMIZZAZIONI SPECIFICHE GALAXY A16 */
+    @media (max-width: 360px) { /* Galaxy A16 e simili */
+      .metric-grid {
+        gap: 8px;
+        margin: 8px 0;
+      }
+      
+      .metric-item {
+        padding: 8px;
+        border-radius: 6px;
+      }
+      
+      .metric-value {
+        font-size: 1.1rem;
+        margin-bottom: 4px;
+      }
+      
+      .metric-label {
+        font-size: 0.75rem;
+      }
+      
+      .sub-section {
+        padding: 8px;
+        margin: 12px 0;
+      }
+      
+      .sub-section h4 {
+        font-size: 0.85rem;
+        margin-bottom: 8px;
+      }
+      
+      /* Header ultra-compatto per Galaxy A16 */
+      .header-bar h1.brand {
+        font-size: 1.2rem;
+        margin: 8px 0;
+      }
+      
+      .header-bar .toolbar {
+        gap: 6px;
+      }
+      
+      .header-bar .toolbar .btn {
+        padding: 8px;
+        font-size: 14px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <header class="app-header">
+    <div class="topbar">
+      <div class="title">Analisi Intelligente</div>
+      <a class="btn btn--ghost" href="/" aria-label="Torna alla dashboard">Dashboard</a>
+    </div>
+
+    <div class="container header-bar">
+      <h1 class="brand">🧠 Dashboard Analisi Intelligente</h1>
+      <div class="toolbar">
+        <input type="date" id="analysisDate" class="date-picker" />
+        <button id="analyzeBtn" class="btn">Analizza Giornata</button>
+        <button id="cleanupBtn" class="btn btn--secondary">Pulisci Campioni</button>
+        <a href="/" class="btn btn--ghost">Torna alla Dashboard</a>
+      </div>
+    </div>
+
+    <div id="msg" class="banner" role="status" aria-live="polite" hidden></div>
+  </header>
+
+  <main class="container">
+    <!-- Selezione Data e Controlli -->
+    <div class="card">
+      <h3>📅 Controllo Analisi</h3>
+      <p>Seleziona una data per analizzare i dati giornalieri e visualizzare insights intelligenti.</p>
+      <div class="toolbar">
+        <button id="yesterdayBtn" class="btn btn--secondary">Analizza Ieri</button>
+        <button id="todayBtn" class="btn btn--secondary">Analizza Oggi</button>
+        <button id="seasonalBtn" class="btn btn--secondary">Insights Stagionali</button>
+      </div>
+    </div>
+
+    <!-- Risultati Analisi -->
+    <div id="analysisResults" style="display: none;">
+             <!-- Riepilogo Generale -->
+       <section class="cards-row">
+         <div class="card">
+           <h3>📊 Riepilogo Giornaliero</h3>
+           <div class="metric-grid">
+             <div class="metric-item">
+               <div class="metric-value" id="totalSamples">-</div>
+               <div class="metric-label">Campioni Totali</div>
+             </div>
+             <div class="metric-item">
+               <div class="metric-value" id="pvEnergy">-</div>
+               <div class="metric-label">☀️ Energia PV (kWh)</div>
+             </div>
+             <div class="metric-item">
+               <div class="metric-value" id="batteryEnergy">-</div>
+               <div class="metric-label">🔋 Energia Batteria (kWh)</div>
+             </div>
+             <div class="metric-item">
+               <div class="metric-value" id="gridEnergy">-</div>
+               <div class="metric-label">⚡ Energia Rete (kWh)</div>
+             </div>
+             <div class="metric-item">
+               <div class="metric-value" id="householdEnergy">-</div>
+               <div class="metric-label">🏠 Energia Casa (kWh)</div>
+             </div>
+             <div class="metric-item">
+               <div class="metric-value" id="systemEfficiency">-</div>
+               <div class="metric-label">🎯 Efficienza Sistema (%)</div>
+             </div>
+           </div>
+         </div>
+       </section>
+
+      <!-- 🌞 TEMATICA FOTOVOLTAICO -->
+      <section class="cards-row">
+        <div class="card theme-card" data-theme="photovoltaic">
+          <h3>☀️ Fotovoltaico - Analisi Completa</h3>
+          
+          <!-- Riepilogo PV -->
+          <div class="metric-grid">
+            <div class="metric-item">
+              <div class="metric-value" id="pvDuration">-</div>
+              <div class="metric-label">Durata Produzione (h)</div>
+            </div>
+                         <div class="metric-item">
+               <div class="metric-value" id="pvPeak">-</div>
+               <div class="metric-label">Picco Potenza (kW)</div>
+             </div>
+            <div class="metric-item">
+              <div class="metric-value" id="pvStart">-</div>
+              <div class="metric-label">Inizio Produzione</div>
+            </div>
+            <div class="metric-item">
+              <div class="metric-value" id="pvEnd">-</div>
+              <div class="metric-label">Fine Produzione</div>
+            </div>
+          </div>
+
+          <!-- Pattern Orari PV -->
+          <div class="sub-section">
+            <h4>📈 Pattern Orari</h4>
+            <div class="metric-grid">
+              <div class="metric-item">
+                <div class="metric-value" id="pvSignificantHours">-</div>
+                <div class="metric-label">Ore Significative</div>
+              </div>
+              <div class="metric-item">
+                <div class="metric-value" id="pvUtilizationRate">-</div>
+                <div class="metric-label">Tasso Utilizzo (%)</div>
+              </div>
+              <div class="metric-item">
+                <div class="metric-value" id="pvPeakHour">-</div>
+                <div class="metric-label">Ora di Picco</div>
+              </div>
+            </div>
+          </div>
+
+
+        </div>
+      </section>
+
+      <!-- 🔋 TEMATICA BATTERIA -->
+      <section class="cards-row">
+        <div class="card theme-card" data-theme="battery">
+          <h3>🔋 Batteria - Analisi Completa</h3>
+          
+          <!-- Riepilogo Batteria -->
+          <div class="metric-grid">
+            <div class="metric-item">
+              <div class="metric-value" id="battCharging">-</div>
+              <div class="metric-label">Energia Carica (kWh)</div>
+            </div>
+            <div class="metric-item">
+              <div class="metric-value" id="battDischarging">-</div>
+              <div class="metric-label">Energia Scarica (kWh)</div>
+            </div>
+            <div class="metric-item">
+              <div class="metric-value" id="battResets">-</div>
+              <div class="metric-label">Reset Batteria</div>
+            </div>
+            <div class="metric-item">
+              <div class="metric-value" id="battVoltage">-</div>
+              <div class="metric-label">Tensione Media (V)</div>
+            </div>
+          </div>
+
+
+        </div>
+      </section>
+
+      <!-- ⚡ TEMATICA RETE ELETTRICA -->
+      <section class="cards-row">
+        <div class="card theme-card" data-theme="grid">
+          <h3>⚡ Rete Elettrica - Analisi Completa</h3>
+          
+          <!-- Riepilogo Rete -->
+          <div class="metric-grid">
+            <div class="metric-item">
+              <div class="metric-value" id="gridImport">-</div>
+              <div class="metric-label">Import dalla Rete (kWh)</div>
+            </div>
+            <div class="metric-item">
+              <div class="metric-value" id="gridExport">-</div>
+              <div class="metric-label">Export alla Rete (kWh)</div>
+            </div>
+            <div class="metric-item">
+              <div class="metric-value" id="morningConsumption">-</div>
+              <div class="metric-label">Consumo Mattutino (kWh)</div>
+            </div>
+            <div class="metric-item">
+              <div class="metric-value" id="nightConsumption">-</div>
+              <div class="metric-label">Consumo Notturno (kWh)</div>
+            </div>
+          </div>
+
+          <!-- Timing Import (OFF-GRID: solo import) -->
+          <div class="sub-section">
+            <h4>⏰ Timing Import</h4>
+            <div class="metric-grid">
+              <div class="metric-item">
+                <div class="metric-value" id="gridMaxImportHour">-</div>
+                <div class="metric-label">Ora Max Import</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 🏠 TEMATICA CASA/CARICO -->
+      <section class="cards-row">
+        <div class="card theme-card" data-theme="household">
+          <h3>🏠 Casa/Carico - Analisi Completa</h3>
+          
+          <!-- Riepilogo Carico -->
+          <div class="metric-grid">
+            <div class="metric-item">
+              <div class="metric-value" id="loadTotalEnergy">-</div>
+              <div class="metric-label">Energia Totale (kWh)</div>
+            </div>
+                         <div class="metric-item">
+               <div class="metric-value" id="loadPeakPower">-</div>
+               <div class="metric-label">Picco Potenza (kW)</div>
+             </div>
+             <div class="metric-item">
+               <div class="metric-value" id="loadAvgPower">-</div>
+               <div class="metric-label">Potenza Media (kW)</div>
+             </div>
+            <div class="metric-item">
+              <div class="metric-value" id="loadPowerFactor">-</div>
+              <div class="metric-label">Fattore Potenza</div>
+            </div>
+          </div>
+
+          <!-- Pattern Consumo -->
+          <div class="sub-section">
+            <h4>📊 Pattern di Consumo</h4>
+            <div class="metric-grid">
+              <div class="metric-item">
+                <div class="metric-value" id="loadNightConsumption">-</div>
+                <div class="metric-label">Consumo Notturno (kWh)</div>
+              </div>
+              <div class="metric-item">
+                <div class="metric-value" id="loadMorningConsumption">-</div>
+                <div class="metric-label">Consumo Mattutino (kWh)</div>
+              </div>
+              <div class="metric-item">
+                <div class="metric-value" id="loadDarkHoursPercentage">-</div>
+                <div class="metric-label">% Ore Buie</div>
+              </div>
+              <div class="metric-item">
+                <div class="metric-value" id="loadConsumptionRatio">-</div>
+                <div class="metric-label">Ratio Buie/Luce (%)</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 🚨 TEMATICA MONITORAGGIO -->
+      <section class="cards-row">
+        <div class="card theme-card" data-theme="monitoring">
+          <h3>🚨 Monitoraggio e Anomalie</h3>
+          
+          <!-- Riepilogo Anomalie -->
+          <div class="metric-grid">
+            <div class="metric-item">
+              <div class="metric-value" id="totalAnomalies">-</div>
+              <div class="metric-label">Anomalie Totali</div>
+            </div>
+            <div class="metric-item">
+              <div class="metric-value" id="highSeverity">-</div>
+              <div class="metric-label">Alta Gravità</div>
+            </div>
+            <div class="metric-item">
+              <div class="metric-value" id="mediumSeverity">-</div>
+              <div class="metric-label">Media Gravità</div>
+            </div>
+            <div class="metric-item">
+              <div class="metric-value" id="pvNightAnomalies">-</div>
+              <div class="metric-label">Anomalie PV Notturne</div>
+            </div>
+          </div>
+
+          <!-- Lista Anomalie -->
+          <div id="anomalyList"></div>
+        </div>
+      </section>
+
+      <!-- 🌍 TEMATICA AMBIENTALE -->
+      <section class="cards-row">
+        <div class="card theme-card" data-theme="environmental">
+          <h3>🌍 Insights Ambientali e Stagionali</h3>
+          
+          <!-- Insights Stagionali -->
+          <div class="metric-grid">
+            <div class="metric-item">
+              <div class="metric-value" id="daylightHours">-</div>
+              <div class="metric-label">Ore di Luce</div>
+            </div>
+            <div class="metric-item">
+              <div class="metric-value" id="season">-</div>
+              <div class="metric-label">Stagione</div>
+            </div>
+            <div class="metric-item">
+              <div class="metric-value" id="dayOfYear">-</div>
+              <div class="metric-label">Giorno dell'Anno</div>
+            </div>
+            <div class="metric-item">
+              <div class="metric-value" id="sunriseHour">-</div>
+              <div class="metric-label">Ora Alba</div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <!-- Grafico Stagionale -->
+    <section class="cards-row">
+      <div id="seasonalChart" class="card" style="display: none;">
+        <h3 style="margin: 0 0 12px 0; font-size: 1.1rem;">📈 Trend Stagionale - Ultimi 30 Giorni</h3>
+        <div style="padding: 8px;">
+          <canvas id="seasonalChartCanvas" class="seasonal-chart"></canvas>
+        </div>
+      </div>
+    </section>
+
+    <!-- Messaggi di Stato -->
+    <div id="statusMessages"></div>
+  </main>
+
+  <script>
+    let currentAnalysis = null;
+    let seasonalChart = null;
+
+    // Inizializzazione
+    document.addEventListener('DOMContentLoaded', function() {
+      // Imposta data di default a ieri
+      const yesterday = new Date();
+      yesterday.setDate(yesterday.getDate() - 1);
+      document.getElementById('analysisDate').value = yesterday.toISOString().split('T')[0];
+      
+      // Event listeners
+      document.getElementById('analyzeBtn').addEventListener('click', analyzeDailyData);
+      document.getElementById('cleanupBtn').addEventListener('click', cleanupDailyData);
+      document.getElementById('yesterdayBtn').addEventListener('click', () => setDateAndAnalyze(-1));
+      document.getElementById('todayBtn').addEventListener('click', () => setDateAndAnalyze(0));
+      document.getElementById('seasonalBtn').addEventListener('click', showSeasonalInsights);
+    });
+
+    function setDateAndAnalyze(daysOffset) {
+      const date = new Date();
+      date.setDate(date.getDate() + daysOffset);
+      document.getElementById('analysisDate').value = date.toISOString().split('T')[0];
+      analyzeDailyData();
+    }
+
+    async function analyzeDailyData() {
+      const date = document.getElementById('analysisDate').value;
+      if (!date) {
+        showMessage('Seleziona una data', 'error');
+        return;
+      }
+
+      showMessage('Analisi in corso...', 'info');
+      
+      try {
+        const response = await fetch(`/api/analysis/daily/${date}`);
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+        
+        currentAnalysis = await response.json();
+        displayAnalysis(currentAnalysis);
+        showMessage(`Analisi completata per ${date}`, 'success');
+        
+      } catch (error) {
+        showMessage(`Errore analisi: ${error.message}`, 'error');
+        console.error('Errore analisi:', error);
+      }
+    }
+
+    async function cleanupDailyData() {
+      if (!currentAnalysis) {
+        showMessage('Prima esegui un\'analisi', 'warning');
+        return;
+      }
+
+      const date = currentAnalysis.date;
+      if (!confirm(`Sei sicuro di voler cancellare i campioni per ${date}? L'analisi verrà mantenuta.`)) {
+        return;
+      }
+
+      showMessage('Pulizia in corso...', 'info');
+      
+      try {
+        const response = await fetch(`/api/analysis/cleanup/${date}`, {
+          method: 'POST'
+        });
+        
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+        
+        const result = await response.json();
+        showMessage(`Pulizia completata: ${result.message}`, 'success');
+        
+        // Aggiorna metriche con riepilogo
+        updateCleanupSummary(result.analysis_summary);
+        
+      } catch (error) {
+        showMessage(`Errore pulizia: ${error.message}`, 'error');
+        console.error('Errore pulizia:', error);
+      }
+    }
+
+    async function showSeasonalInsights() {
+      showMessage('Caricamento insights stagionali...', 'info');
+      
+      try {
+        const response = await fetch('/api/analysis/seasonal');
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+        
+        const seasonalData = await response.json();
+        displaySeasonalChart(seasonalData);
+        showMessage('Insights stagionali caricati', 'success');
+        
+      } catch (error) {
+        showMessage(`Errore insights stagionali: ${error.message}`, 'error');
+        console.error('Errore insights stagionali:', error);
+      }
+    }
+
+    function displayAnalysis(analysis) {
+      // Mostra risultati
+      document.getElementById('analysisResults').style.display = 'block';
+      
+      // Riepilogo generale
+      document.getElementById('totalSamples').textContent = analysis.total_samples || 0;
+      document.getElementById('pvEnergy').textContent = formatValue(analysis.photovoltaic?.daily_summary?.total_energy_kwh, 'energy');
+      document.getElementById('batteryEnergy').textContent = formatValue(analysis.battery?.daily_summary?.total_energy_kwh, 'energy');
+      document.getElementById('gridEnergy').textContent = formatValue(analysis.grid?.daily_summary?.total_energy_kwh, 'energy');
+      document.getElementById('householdEnergy').textContent = formatValue(analysis.household?.daily_summary?.total_energy_kwh, 'energy');
+      document.getElementById('systemEfficiency').textContent = formatValue(analysis.daily_summary?.system_efficiency, 'percentage');
+      
+             // 🌞 ANALISI FOTOVOLTAICO COMPLETA
+       const pv = analysis.photovoltaic || {};
+       document.getElementById('pvDuration').textContent = formatValue(pv.daily_summary?.duration_hours, 'time');
+       document.getElementById('pvPeak').textContent = formatValue(pv.daily_summary?.peak_power_kw, 'power_kw');
+       document.getElementById('pvStart').textContent = formatTime(pv.daily_summary?.production_start);
+       document.getElementById('pvEnd').textContent = formatTime(pv.daily_summary?.production_end);
+      
+      // Pattern Orari PV
+      const pvPatterns = pv.hourly_patterns || {};
+      document.getElementById('pvSignificantHours').textContent = formatValue(pvPatterns.significant_hours, 'time');
+      document.getElementById('pvUtilizationRate').textContent = formatValue(pvPatterns.utilization_rate, 'percentage');
+      document.getElementById('pvPeakHour').textContent = pvPatterns.peak_hour || 'N/A';
+      
+
+      
+      // 🔋 ANALISI BATTERIA COMPLETA
+      const batt = analysis.battery || {};
+      document.getElementById('battCharging').textContent = formatValue(batt.daily_summary?.charging_energy_kwh, 'energy');
+      document.getElementById('battDischarging').textContent = formatValue(batt.daily_summary?.discharging_energy_kwh, 'energy');
+      document.getElementById('battResets').textContent = batt.daily_summary?.reset_events_count || 0;
+      document.getElementById('battVoltage').textContent = formatValue(batt.daily_summary?.avg_voltage, 'voltage');
+      
+
+      
+      // ⚡ ANALISI RETE ELETTRICA COMPLETA
+      const grid = analysis.grid || {};
+      document.getElementById('gridImport').textContent = formatValue(grid.daily_summary?.import_energy_kwh, 'energy');
+      document.getElementById('gridExport').textContent = formatValue(grid.daily_summary?.export_energy_kwh, 'energy');
+      document.getElementById('morningConsumption').textContent = formatValue(grid.daily_summary?.morning_consumption_kwh, 'energy');
+      document.getElementById('nightConsumption').textContent = formatValue(grid.daily_summary?.night_consumption_kwh, 'energy');
+      
+      // Timing Import Rete (OFF-GRID: solo import)
+      const gridImport = grid.import_timing || {};
+      document.getElementById('gridMaxImportHour').textContent = gridImport.max_import_hour || 'N/A';
+      
+             // 🏠 ANALISI CASA/CARICO COMPLETA
+       const load = analysis.household || {};
+       document.getElementById('loadTotalEnergy').textContent = formatValue(load.daily_summary?.total_energy_kwh, 'energy');
+       document.getElementById('loadPeakPower').textContent = formatValue(load.daily_summary?.peak_load_kw, 'power_kw');
+       document.getElementById('loadAvgPower').textContent = formatValue(load.daily_summary?.avg_load_kw, 'power_kw');
+       document.getElementById('loadPowerFactor').textContent = formatValue(load.daily_summary?.avg_power_factor, 'number');
+      
+      // Pattern Consumo Casa (semplificato)
+      document.getElementById('loadNightConsumption').textContent = formatValue(load.daily_summary?.night_consumption_kwh, 'energy');
+      document.getElementById('loadMorningConsumption').textContent = formatValue(load.daily_summary?.morning_consumption_kwh, 'energy');
+      document.getElementById('loadDarkHoursPercentage').textContent = formatValue(load.daily_summary?.dark_hours_percentage, 'percentage');
+      document.getElementById('loadConsumptionRatio').textContent = formatValue(load.daily_summary?.consumption_ratio, 'percentage');
+      
+      // 🚨 MONITORAGGIO E ANOMALIE
+      const anomalies = analysis.monitoring?.anomaly_detection || {};
+      document.getElementById('totalAnomalies').textContent = anomalies.total_anomalies || 0;
+      document.getElementById('highSeverity').textContent = anomalies.high_severity || 0;
+      document.getElementById('mediumSeverity').textContent = anomalies.medium_severity || 0;
+      document.getElementById('pvNightAnomalies').textContent = anomalies.pv_night_anomalies || 0;
+      
+      // Lista anomalie
+      displayAnomalies(anomalies.anomalies || []);
+      
+      // 🌍 INSIGHTS AMBIENTALI E STAGIONALI
+      const environmental = analysis.environmental || {};
+      document.getElementById('daylightHours').textContent = environmental.seasonal_insights?.daylight_hours || 0;
+      document.getElementById('season').textContent = environmental.seasonal_insights?.season || 'N/A';
+      document.getElementById('dayOfYear').textContent = environmental.seasonal_insights?.day_of_year || 0;
+      document.getElementById('sunriseHour').textContent = environmental.seasonal_insights?.sunrise_hour || 'N/A';
+    }
+
+    function displayAnomalies(anomalies) {
+      const container = document.getElementById('anomalyList');
+      container.innerHTML = '';
+      
+      if (anomalies.length === 0) {
+        container.innerHTML = '<p style="color: var(--success);">✅ Nessuna anomalia rilevata</p>';
+        return;
+      }
+      
+      anomalies.forEach(anomaly => {
+        const div = document.createElement('div');
+        div.className = `anomaly-item ${anomaly.severity === 'high' ? 'anomaly-high' : ''}`;
+        
+        const severityClass = anomaly.severity === 'high' ? 'status-error' : 'status-warning';
+        const severityText = anomaly.severity === 'high' ? 'ALTA' : 'MEDIA';
+        
+        div.innerHTML = `
+          <div style="display: flex; justify-content: space-between; align-items: center;">
+            <div>
+              <strong>${anomaly.type.replace(/_/g, ' ').toUpperCase()}</strong><br>
+              <small>${formatTime(anomaly.timestamp)}</small>
+            </div>
+            <span class="status-badge ${severityClass}">${severityText}</span>
+          </div>
+                     <div style="margin-top: 8px; color: var(--muted);">
+             ${anomaly.type.includes('power_peak') ? 
+               `Valore: ${anomaly.value}kW (soglia: ${anomaly.threshold}kW)` :
+               `Variazione: ${anomaly.change_kw}kW (da ${anomaly.from}kW a ${anomaly.to}kW)`
+             }
+           </div>
+        `;
+        
+        container.appendChild(div);
+      });
+    }
+
+    function displaySeasonalChart(seasonalData) {
+      document.getElementById('seasonalChart').style.display = 'block';
+      
+      const ctx = document.getElementById('seasonalChartCanvas').getContext('2d');
+      
+      if (seasonalChart) {
+        seasonalChart.destroy();
+      }
+      
+      // Ordina i dati per data (dal meno recente al più recente)
+      const sortedData = seasonalData.seasonal_data.sort((a, b) => new Date(a.date) - new Date(b.date));
+      
+      const labels = sortedData.map(d => d.date);
+      const daylightData = sortedData.map(d => d.daylight_hours);
+      const pvData = sortedData.map(d => d.pv_energy);
+      
+      seasonalChart = new Chart(ctx, {
+        type: 'line',
+        data: {
+          labels: labels,
+          datasets: [
+            {
+              label: 'Ore di Luce',
+              data: daylightData,
+              borderColor: '#f59e0b',
+              backgroundColor: 'rgba(245, 158, 11, 0.1)',
+              yAxisID: 'y'
+            },
+            {
+              label: 'Energia PV (kWh)',
+              data: pvData,
+              borderColor: '#22c55e',
+              backgroundColor: 'rgba(34, 197, 94, 0.1)',
+              yAxisID: 'y1'
+            }
+          ]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          interaction: {
+            mode: 'index',
+            intersect: false,
+          },
+          plugins: {
+            legend: {
+              position: 'top',
+              labels: {
+                boxWidth: 12,
+                padding: 8,
+                font: {
+                  size: 11
+                }
+              }
+            }
+          },
+          scales: {
+            x: {
+              display: true,
+              title: {
+                display: true,
+                text: 'Data',
+                font: { size: 11 }
+              },
+              ticks: {
+                font: { size: 10 },
+                maxRotation: 45,
+                minRotation: 0,
+                callback: function(value, index) {
+                  // Formatta le date in formato più leggibile (es: 30 Ago)
+                  const date = new Date(this.getLabelForValue(value));
+                  return date.toLocaleDateString('it-IT', { 
+                    day: '2-digit', 
+                    month: 'short' 
+                  });
+                }
+              }
+            },
+            y: {
+              type: 'linear',
+              display: true,
+              position: 'left',
+              title: {
+                display: true,
+                text: 'Ore di Luce',
+                font: { size: 11 }
+              },
+              ticks: {
+                font: { size: 10 },
+                maxTicksLimit: 6
+              }
+            },
+            y1: {
+              type: 'linear',
+              display: true,
+              position: 'right',
+              title: {
+                display: true,
+                text: 'Energia PV (kWh)',
+                font: { size: 11 }
+              },
+              ticks: {
+                font: { size: 10 },
+                maxTicksLimit: 6
+              },
+              grid: {
+                drawOnChartArea: false,
+              },
+            }
+          }
+        }
+      });
+    }
+
+    function updateCleanupSummary(summary) {
+      if (summary) {
+        document.getElementById('totalSamples').textContent = summary.total_samples || 0;
+        document.getElementById('pvEnergy').textContent = formatValue(summary.photovoltaic?.daily_summary?.total_energy_kwh, 'energy');
+        document.getElementById('batteryEnergy').textContent = formatValue(summary.battery?.daily_summary?.total_energy_kwh, 'energy');
+        document.getElementById('gridEnergy').textContent = formatValue(summary.grid?.daily_summary?.total_energy_kwh, 'energy');
+        document.getElementById('householdEnergy').textContent = formatValue(summary.household?.daily_summary?.total_energy_kwh, 'energy');
+      }
+    }
+
+    function formatTime(timestamp) {
+      if (!timestamp) return 'N/A';
+      try {
+        const date = new Date(timestamp);
+        return date.toLocaleTimeString('it-IT', { 
+          hour: '2-digit', 
+          minute: '2-digit',
+          second: '2-digit'
+        });
+      } catch {
+        return timestamp;
+      }
+    }
+    
+         function formatValue(value, type = 'number') {
+       if (value === null || value === undefined || value === '') return 'N/A';
+       
+       switch (type) {
+         case 'percentage':
+           return `${parseFloat(value).toFixed(1)}%`;
+         case 'power':
+           return `${parseFloat(value).toFixed(0)}W`;
+         case 'power_kw':
+           return `${parseFloat(value).toFixed(3)}kW`;
+         case 'energy':
+           return `${parseFloat(value).toFixed(3)}kWh`;
+         case 'voltage':
+           return `${parseFloat(value).toFixed(2)}V`;
+         case 'time':
+           return `${parseFloat(value).toFixed(1)}h`;
+         case 'minutes':
+           return `${parseFloat(value).toFixed(0)}min`;
+         case 'score':
+           return parseFloat(value).toFixed(1);
+         case 'currency':
+           return `€${parseFloat(value).toFixed(2)}`;
+         default:
+           return parseFloat(value).toFixed(2);
+       }
+     }
+
+    function showMessage(text, type = 'info') {
+      const msgEl = document.getElementById('msg');
+      msgEl.textContent = text;
+      msgEl.className = `banner ${type}`;
+      msgEl.hidden = false;
+      
+      setTimeout(() => {
+        msgEl.hidden = true;
+      }, 5000);
+    }
+  </script>
+</body>
+</html>

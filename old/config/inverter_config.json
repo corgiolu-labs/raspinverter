@@ -1,0 +1,105 @@
+{
+  "serial": {
+    "port": "/dev/serial0",
+    "baudrate": 9600,
+    "parity": "N",
+    "stopbits": 1,
+    "bytesize": 8,
+    "timeout": 1.0,
+    "unit_id": 1
+  },
+  "polling": {
+    "interval_sec": 5
+  },
+  "battery": {
+    "type": "lifepo4",
+    "nominal_voltage": 48.0,
+    "nominal_ah": 100,
+    "soc": {
+      "method": "energy_balance",
+      "reset_voltage": 44.0
+    },
+    "net_reset_voltage": 46.0
+  },
+  "ui": {
+    "unit": "W"
+  },
+  "relay": {
+    "mode": "gpio",
+    "enabled": false,
+    "gpio_pin": 17,
+    "active_high": true,
+    "on_v": 47.5,
+    "off_v": 49.0,
+    "min_toggle_sec": 5
+  },
+  "i2c": {
+    "enabled": false,
+    "bus": 1,
+    "devices": [
+      {
+        "type": "ads1115",
+        "name": "adc_placeholder_1",
+        "address": 72,
+        "pga_v": 0.256,
+        "data_rate": 128,
+        "channels": [
+          {
+            "index": 0,
+            "name": "CH0",
+            "amp_per_mv": 0.1
+          },
+          {
+            "index": 1,
+            "name": "CH1",
+            "amp_per_mv": 0.1
+          },
+          {
+            "index": 2,
+            "name": "CH2",
+            "amp_per_mv": 0.1
+          },
+          {
+            "index": 3,
+            "name": "CH3",
+            "amp_per_mv": 0.1
+          }
+        ]
+      },
+      {
+        "type": "ads1115",
+        "name": "adc_placeholder_2",
+        "address": 73,
+        "pga_v": 0.256,
+        "data_rate": 128,
+        "channels": [
+          {
+            "index": 0,
+            "name": "CH4",
+            "amp_per_mv": 0.1
+          },
+          {
+            "index": 1,
+            "name": "VDIV_HIGH",
+            "divider_bottom_ohm": 100000,
+            "divider_top_ohm": 100000,
+            "display_unit": "V"
+          },
+          {
+            "index": 2,
+            "name": "VDIV_LOW",
+            "divider_bottom_ohm": 100000,
+            "divider_top_ohm": 100000,
+            "display_unit": "V",
+            "subtract_channel": "VDIV_HIGH"
+          },
+          {
+            "index": 3,
+            "name": "CH7",
+            "amp_per_mv": 0.1
+          }
+        ]
+      }
+    ]
+  }
+}

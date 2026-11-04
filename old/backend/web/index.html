@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#0f172a" />
+  <title>Inverter Dashboard</title>
+  <link rel="stylesheet" href="/main.css?v=20251128" />
+  <link rel="manifest" href="/manifest.webmanifest" />
+  <link rel="icon" href="/icons/icon.svg" type="image/svg+xml" />
+  <link rel="apple-touch-icon" href="/icons/icon-192.png" />
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+</head>
+<body>
+  <!-- Header / Topbar -->
+  <header class="app-header">
+    <div class="topbar">
+      <div class="title">Inverter</div>
+      <div class="topbar-buttons">
+        <a class="btn btn--ghost" href="/analysis" aria-label="Dashboard Analisi Intelligente">🧠 Analisi</a>
+        <a class="btn btn--ghost" href="/settings" aria-label="Apri impostazioni">Impostazioni</a>
+      </div>
+    </div>
+
+    <div class="container header-bar">
+      <h1 class="brand">Inverter Dashboard</h1>
+      <div class="toolbar">
+        <button id="btnRefresh" class="btn" type="button">Aggiorna</button>
+        <button id="btnInstall" class="btn btn--secondary" type="button" hidden title="Installa l'app sul dispositivo">Installa app</button>
+        <span id="lastUpdate" class="badge" style="opacity:.7" role="status" aria-label="Ultimo aggiornamento">--:--</span>
+        <span id="connBadge" class="badge badge-off" role="status" aria-live="polite">OFF LINE</span>
+      </div>
+    </div>
+
+    <div id="errorBanner" class="banner" role="alert" aria-live="polite" hidden></div>
+  </header>
+
+  <main class="container">
+    <!-- Cards -->
+    <section class="cards-row">
+        <!-- Card Fotovoltaico -->
+        <div class="card">
+          <h3>☀️ Fotovoltaico</h3>
+          <div class="card-content">
+            <table>
+              <tr><td>Potenza</td><td id="pv_power">-</td></tr>
+              <tr><td>Tensione</td><td id="pv_v">-</td></tr>
+              <tr><td>Corrente</td><td id="pv_a">-</td></tr>
+            </table>
+            <div class="chart-toggle">
+              <button class="btn-toggle" data-card="pv" title="Espandi grafico">
+                📊 Espandi Grafico
+              </button>
+            </div>
+            <div class="chart-container" id="chartContainerPV" style="display: none;">
+              <canvas id="chartPV" role="img" aria-label="PV"></canvas>
+            </div>
+          </div>
+        </div>
+
+        <!-- Card Batteria -->
+        <div class="card">
+          <div class="card-header-with-donut">
+            <h3>🔋 Batteria</h3>
+            <div class="donut-status-container">
+              <div class="soc-display">
+                <span id="soc_label">-</span>
+              </div>
+              <div class="donut-wrap compact">
+                <canvas id="batteryDonut" aria-label="SOC batteria" role="img"></canvas>
+              </div>
+            </div>
+          </div>
+          <div class="card-content">
+            <table>
+              <tr><td>Potenza</td><td id="battery_power">-</td></tr>
+              <tr><td>Tensione</td><td id="battery_v">-</td></tr>
+              <tr><td>Corrente</td><td id="battery_a">-</td></tr>
+              <tr class="battery-status-row">
+                <td>Stato</td>
+                <td>
+                  <div class="status-info">
+                    <span id="battery_state">-</span>
+                  </div>
+                </td>
+              </tr>
+            </table>
+            <div class="chart-toggle">
+              <button class="btn-toggle" data-card="battery" title="Espandi grafico">
+                📊 Espandi Grafico
+              </button>
+            </div>
+            <div class="chart-container" id="chartContainerBattery" style="display: none;">
+              <canvas id="chartBatt" role="img" aria-label="Batteria"></canvas>
+            </div>
+          </div>
+        </div>
+
+        <!-- Card Rete -->
+        <div class="card">
+          <h3>⚡ Rete</h3>
+          <div class="card-content">
+            <table>
+              <tr><td>Potenza</td><td id="grid_power">-</td></tr>
+              <tr><td>Tensione</td><td id="grid_v">-</td></tr>
+              <tr><td>Frequenza</td><td id="grid_hz">-</td></tr>
+              <tr><td>Corrente</td><td id="grid_a">-</td></tr>
+            </table>
+            <div class="chart-toggle">
+              <button class="btn-toggle" data-card="grid" title="Espandi grafico">
+                📊 Espandi Grafico
+              </button>
+            </div>
+            <div class="chart-container" id="chartContainerGrid" style="display: none;">
+              <canvas id="chartGrid" role="img" aria-label="Rete"></canvas>
+            </div>
+          </div>
+        </div>
+
+        <!-- Card Casa -->
+        <div class="card">
+          <h3>🏠 Casa</h3>
+          <div class="card-content">
+            <table>
+              <tr><td>Potenza</td><td id="load_power">-</td></tr>
+              <tr><td>Tensione</td><td id="load_v">-</td></tr>
+              <tr><td>Frequenza</td><td id="load_hz">-</td></tr>
+              <tr><td>Corrente</td><td id="load_a">-</td></tr>
+              <tr><td>Fattore di Potenza</td><td id="load_pf">-</td></tr>
+            </table>
+            <div class="chart-toggle">
+              <button class="btn-toggle" data-card="load" title="Espandi grafico">
+                📊 Espandi Grafico
+              </button>
+            </div>
+            <div class="chart-container" id="chartContainerLoad" style="display: none;">
+              <canvas id="chartLoad" role="img" aria-label="Casa"></canvas>
+            </div>
+          </div>
+        </div>
+    </section>
+
+    <!-- I2C / ADC -->
+    <section class="cards-row">
+        <div class="card">
+          <h3>🧪 I2C / ADC</h3>
+          <div class="card-content">
+            <div id="i2c_container">
+              <table id="i2c_table" aria-label="Letture I2C/ADC">
+                <tr><td>Stato</td><td id="i2c_status">Nessun dato</td></tr>
+              </table>
+            </div>
+            <div class="chart-toggle">
+              <button class="btn-toggle" data-card="i2c" title="Espandi grafico">
+                📊 Espandi Grafico
+              </button>
+            </div>
+            <div class="chart-container" id="chartContainerI2C" style="display: none;">
+              <canvas id="chartI2CLive" role="img" aria-label="I2C/ADC Live"></canvas>
+            </div>
+          </div>
+        </div>
+    </section>
+
+    <!-- Storico I2C -->
+    <section class="chart-wide">
+      <div class="card hist-controls">
+        <label>Data</label>
+        <input type="date" id="i2cDate" />
+        <label>Device</label>
+        <select id="i2cDev"></select>
+        <label>Canale</label>
+        <select id="i2cCh"></select>
+        <label>Metrica</label>
+        <select id="i2cMetric">
+          <option value="mv">mV</option>
+          <option value="current_a">A</option>
+        </select>
+        <button id="i2cApply" class="btn" type="button">Applica</button>
+      </div>
+      <div class="chart-card"><canvas id="chartI2C" role="img" aria-label="Storico I2C/ADC"></canvas></div>
+    </section>
+    <!-- Totali oggi -->
+    <section class="chart-wide">
+      <div class="card totals-card">
+        <h3>Energia oggi</h3>
+        <div class="energy-grid">
+          <div class="energy-item pv-energy">
+            <div class="energy-icon">☀️</div>
+            <div class="energy-label">Fotovoltaico</div>
+            <div class="energy-value" id="sum_pv">-</div>
+            <div class="energy-unit">kWh</div>
+          </div>
+          
+          <div class="energy-item batt-energy">
+            <div class="energy-icon">🔋</div>
+            <div class="energy-label">Batteria (netta)</div>
+            <div class="energy-value" id="sum_batt_net">-</div>
+            <div class="energy-unit">kWh</div>
+          </div>
+          
+          <div class="energy-item grid-energy">
+            <div class="energy-icon">⚡</div>
+            <div class="energy-label">Rete</div>
+            <div class="energy-value" id="sum_grid">-</div>
+            <div class="energy-unit">kWh</div>
+          </div>
+          
+          <div class="energy-item load-energy">
+            <div class="energy-icon">🏠</div>
+            <div class="energy-label">Casa</div>
+            <div class="energy-value" id="sum_load">-</div>
+            <div class="energy-unit">kWh</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Storico -->
+    <section class="chart-wide">
+      <div class="card hist-controls">
+        <label>Vista</label>
+        <select id="histGran">
+          <option value="hour">Ora (oggi)</option>
+          <option value="day">Giorno (mese)</option>
+          <option value="month">Mese (anno)</option>
+          <option value="year">Anno (storico)</option>
+        </select>
+        <label>Data</label>
+        <input type="date" id="histDate" />
+        <label><input type="checkbox" id="chkPV" checked /> PV</label>
+        <label><input type="checkbox" id="chkBatt" checked /> Batteria netta</label>
+        <label><input type="checkbox" id="chkGrid" checked /> Rete</label>
+        <label><input type="checkbox" id="chkLoad" checked /> Casa</label>
+        <button id="histApply" class="btn" type="button">Applica</button>
+      </div>
+      <div class="chart-card"><canvas id="chartHistory" role="img" aria-label="Storico energia"></canvas></div>
+    </section>
+  </main>
+
+  <footer class="container foot"><small>UI standard � colori coerenti � modulare</small></footer>
+
+  <script src="/app.mod.js?v=20251128"></script>
+</body>
+</html>

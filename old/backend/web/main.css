@@ -1,0 +1,1148 @@
+:root{
+  --bg:#0f172a; --surface:#111827; --surface-2:#0b1220; --text:#e5e7eb; --muted:#94a3b8;
+  --primary:#10b981; --primary-700:#059669; --danger:#ef4444; --card:#0b1220; --border:#1f2937;
+  --c-pv:#22c55e; --c-batt:#3b82f6; --c-load:#f59e0b; --c-grid:#a855f7; --c-muted:#475569;
+  --accent:#3b82f6; --success:#10b981; --warning:#f59e0b; --error:#ef4444;
+  --radius:14px; --shadow:0 8px 24px rgba(0,0,0,.35);
+  --transition: all 0.2s ease;
+}
+
+/* Ottimizzazioni globali per performance */
+*{ 
+  box-sizing:border-box;
+  /* Ottimizzazione rendering */
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  /* Riduce reflow */
+  transform: translateZ(0);
+  backface-visibility: hidden;
+}
+
+html,body{ 
+  height:100%;
+  /* Ottimizzazione scroll */
+  scroll-behavior: smooth;
+  /* Riduce reflow */
+  overflow-x: hidden;
+}
+
+body{
+  margin:0;
+  font-family:system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;
+  background:
+    radial-gradient(1200px 600px at 20% -10%, #172554 0%, transparent 60%),
+    radial-gradient(800px 400px at 110% -10%, #064e3b 0%, transparent 50%),
+    var(--bg);
+  color:var(--text);
+  /* Ottimizzazione rendering */
+  text-rendering: optimizeLegibility;
+  /* Riduce reflow */
+  line-height: 1.5;
+}
+
+/* Layout base ottimizzato */
+.container{ 
+  max-width:1200px; 
+  margin:0 auto; 
+  padding:16px;
+  /* Ottimizzazione rendering */
+  contain: layout style;
+}
+
+/* Header ottimizzato */
+.app-header{
+  position:sticky; 
+  top:0; 
+  z-index:10;
+  backdrop-filter:saturate(140%) blur(10px);
+  background:rgba(15,23,42,.65);
+  border-bottom:1px solid var(--border);
+  /* Ottimizzazione rendering */
+  contain: layout style;
+  /* Riduce reflow */
+  will-change: backdrop-filter;
+}
+
+/* Topbar con pulsanti affiancati */
+.topbar{
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  background: rgba(15,23,42,.85);
+  border-bottom: 1px solid var(--border);
+}
+
+.topbar .title{
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.topbar-buttons{
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.topbar-buttons .btn{
+  padding: 6px 12px;
+  font-size: 0.9rem;
+  font-weight: 500;
+}
+
+.header-bar{ 
+  display:flex; 
+  align-items:center; 
+  justify-content:space-between; 
+  gap:16px;
+  /* Ottimizzazione rendering */
+  contain: layout;
+}
+
+.brand{ 
+  font-size:1.1rem; 
+  margin:0; 
+  color:#fff;
+  /* Ottimizzazione rendering */
+  contain: layout style;
+}
+
+.toolbar{ 
+  display:flex; 
+  align-items:center; 
+  gap:10px;
+  /* Ottimizzazione rendering */
+  contain: layout;
+}
+
+/* Select / input base ottimizzati */
+.select,
+input.select,
+select{
+  background:var(--surface);
+  color:var(--text);
+  border:1px solid var(--border);
+  padding:6px 10px;
+  border-radius:10px;
+  /* Ottimizzazione rendering */
+  contain: layout style;
+  /* Riduce reflow */
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+/* Bottoni: UNA SOLA definizione + varianti - OTTIMIZZATI */
+.btn{
+  background:var(--primary);
+  border:none;
+  color:#052e2b;
+  padding:8px 14px;
+  border-radius:10px;
+  font-weight:700;
+  cursor:pointer;
+  box-shadow:var(--shadow);
+  display:inline-flex;
+  align-items:center;
+  gap:.5rem;
+  text-decoration:none;
+  /* Ottimizzazione transizioni */
+  transition:background .15s ease, color .15s ease, transform .06s ease;
+  /* Ottimizzazione rendering */
+  contain: layout style;
+  /* Riduce reflow */
+  will-change: transform;
+  /* Ottimizzazione touch */
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+
+.btn:hover{ 
+  background:var(--primary-700); 
+  color:#eafff7;
+  /* Ottimizzazione hover */
+  transform: translateY(-1px);
+}
+
+.btn:active{ 
+  transform:translateY(1px);
+  /* Ottimizzazione active */
+  transition: transform 0.05s ease;
+}
+
+.btn:focus-visible{
+  outline:2px solid #22d3ee;   /* focus chiaro accessibile */
+  outline-offset:2px;
+  /* Ottimizzazione focus */
+  transition: outline 0.15s ease;
+}
+
+.btn:disabled,
+.btn[aria-disabled="true"]{
+  opacity:.5;
+  cursor:not-allowed;
+  /* Disabilita transizioni per elementi disabilitati */
+  transition: none;
+}
+
+/* Varianti coerenti ottimizzate */
+.btn--ghost{
+  background:transparent;
+  border:1px solid rgba(255,255,255,.25);
+  color:var(--text);
+  /* Ottimizzazione rendering */
+  contain: layout style;
+}
+
+.btn--ghost:hover{ 
+  background:rgba(255,255,255,.08); 
+  color:#fff;
+  /* Ottimizzazione hover */
+  border-color: rgba(255,255,255,.4);
+}
+
+.btn--secondary{
+  background:var(--surface);
+  border:1px solid var(--border);
+  color:var(--text);
+  /* Ottimizzazione rendering */
+  contain: layout style;
+}
+
+.btn--secondary:hover{ 
+  background:#0f1a2d;
+  /* Ottimizzazione hover */
+  border-color: var(--primary);
+}
+
+.btn--danger{
+  background:transparent;
+  border:1px solid rgba(239,68,68,.5);
+  color:#fecaca;
+  /* Ottimizzazione rendering */
+  contain: layout style;
+}
+
+.btn--danger:hover{ 
+  background:rgba(239,68,68,.12);
+  /* Ottimizzazione hover */
+  border-color: rgba(239,68,68,.7);
+}
+
+/* Badge, banner ottimizzati */
+.badge{
+  padding:6px 10px;
+  border-radius:999px;
+  font-size:.75rem;
+  font-weight:600;
+  text-align:center;
+  white-space:nowrap;
+  /* Ottimizzazione rendering */
+  contain: layout style;
+  /* Riduce reflow */
+  display: inline-block;
+}
+
+.badge-on{
+  background:var(--primary);
+  color:#052e2b;
+  /* Ottimizzazione rendering */
+  contain: layout style;
+}
+
+.badge-off{
+  background:var(--danger);
+  color:#fef2f2;
+  /* Ottimizzazione rendering */
+  contain: layout style;
+}
+
+/* Banner per messaggi - OTTIMIZZATO */
+.banner{
+  padding:12px 16px;
+  margin:0;
+  border-radius:var(--radius);
+  font-weight:500;
+  text-align:center;
+  /* Ottimizzazione rendering */
+  contain: layout style;
+  /* Riduce reflow */
+  will-change: opacity, transform;
+}
+
+.banner.ok{
+  background:rgba(16,185,129,.15);
+  color:#10b981;
+  border:1px solid rgba(16,185,129,.3);
+}
+
+.banner.err{
+  background:rgba(239,68,68,.15);
+  color:#ef4444;
+  border:1px solid rgba(239,68,68,.3);
+}
+
+.banner.warn{
+  background:rgba(245,158,11,.15);
+  color:#f59e0b;
+  border:1px solid rgba(245,158,11,.3);
+}
+
+/* Animazione banner */
+.banner {
+  animation: slideDown 0.3s ease-out;
+  transform-origin: top;
+}
+
+@keyframes slideDown {
+  from {
+    opacity: 0;
+    transform: translateY(-10px) scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+/* Banner nascosto */
+.banner[hidden] {
+  display: none !important;
+}
+
+/* Cards ottimizzate */
+.cards-row{
+  display:grid;
+  grid-template-columns:repeat(auto-fit, minmax(280px, 1fr));
+  gap:16px;
+  margin:24px 0;
+  /* Ottimizzazione rendering */
+  contain: layout;
+}
+
+/* Stili per le card con grafici integrati */
+.card {
+  position: relative;
+  overflow: hidden;
+  transition: all 0.3s ease;
+}
+
+.card-content {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.chart-toggle {
+  text-align: center;
+  margin-top: 8px;
+}
+
+.btn-toggle {
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  color: var(--text);
+  padding: 8px 16px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  font-size: 14px;
+}
+
+.btn-toggle:hover {
+  background: rgba(255, 255, 255, 0.15);
+  border-color: rgba(255, 255, 255, 0.3);
+  transform: translateY(-1px);
+}
+
+.btn-toggle.expanded {
+  background: rgba(255, 255, 255, 0.2);
+  border-color: var(--accent);
+}
+
+.chart-container {
+  height: 200px;
+  margin-top: 16px;
+  border-radius: 8px;
+  overflow: hidden;
+  background: rgba(0, 0, 0, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  transition: all 0.3s ease;
+}
+
+.chart-container canvas {
+  width: 100% !important;
+  height: 100% !important;
+}
+
+/* Animazioni per l'espansione */
+.card.expanded {
+  transform: scale(1.02);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+}
+
+.card.expanded .chart-container {
+  height: 200px;
+  opacity: 1;
+}
+
+/* Responsive per mobile */
+@media (max-width: 768px) {
+  .chart-container {
+    height: 150px;
+  }
+  
+  .btn-toggle {
+    padding: 6px 12px;
+    font-size: 13px;
+  }
+}
+
+.card{
+  background:var(--card);
+  border:1px solid var(--border);
+  border-radius:var(--radius);
+  padding:20px;
+  box-shadow:var(--shadow);
+  /* Ottimizzazione rendering */
+  contain: layout style;
+  /* Riduce reflow */
+  will-change: transform;
+  /* Ottimizzazione hover */
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.card:hover{
+  /* Ottimizzazione hover */
+  transform: translateY(-2px);
+  box-shadow: 0 12px 32px rgba(0,0,0,.4);
+}
+
+.card h3{
+  margin:0 0 16px 0;
+  font-size:1.1rem;
+  color:#fff;
+  /* Ottimizzazione rendering */
+  contain: layout style;
+}
+
+/* KV table ottimizzata */
+.kv{
+  width:100%;
+  border-collapse:collapse;
+  /* Ottimizzazione rendering */
+  contain: layout;
+}
+
+.kv td{
+  padding:8px 0;
+  border-bottom:1px solid rgba(255,255,255,.1);
+  /* Ottimizzazione rendering */
+  contain: layout style;
+}
+
+.kv td:first-child{
+  color:var(--muted);
+  font-weight:500;
+  width:30%;
+  /* Ottimizzazione rendering */
+  contain: layout style;
+}
+
+.kv td:last-child{
+  text-align:right;
+  font-weight:600;
+  font-family:monospace;
+  /* Ottimizzazione rendering */
+  contain: layout style;
+}
+
+/* Donut chart ottimizzato */
+.donut-wrap{
+  position:relative;
+  width:80px;
+  height:80px;
+  margin:16px auto 0;
+  /* Ottimizzazione rendering */
+  contain: layout;
+}
+
+.donut-center{
+  position:absolute;
+  top:50%;
+  left:50%;
+  transform:translate(-50%, -50%);
+  font-size:.9rem;
+  font-weight:600;
+  color:#fff;
+  /* Ottimizzazione rendering */
+  contain: layout style;
+}
+
+/* Charts grid ottimizzata */
+.charts-grid{
+  display:grid;
+  grid-template-columns:repeat(auto-fit, minmax(400px, 1fr));
+  gap:16px;
+  margin:24px 0;
+  /* Ottimizzazione rendering */
+  contain: layout;
+}
+
+.chart-card{
+  background:var(--card);
+  border:1px solid var(--border);
+  border-radius:var(--radius);
+  padding:16px;
+  box-shadow:var(--shadow);
+  /* Ottimizzazione rendering */
+  contain: layout style;
+  /* Riduce reflow */
+  will-change: transform;
+  /* Ottimizzazione hover */
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.chart-card:hover{
+  /* Ottimizzazione hover */
+  transform: translateY(-1px);
+  box-shadow: 0 10px 28px rgba(0,0,0,.4);
+  transition: var(--transition);
+}
+
+.chart-card canvas{
+  width:100% !important;
+  height:200px !important;
+  /* Ottimizzazione rendering */
+  contain: layout style;
+}
+
+/* Chart wide ottimizzato */
+.chart-wide{
+  margin:24px 0;
+  /* Ottimizzazione rendering */
+  contain: layout;
+}
+
+.totals-card{
+  background:var(--card);
+  border:1px solid var(--border);
+  border-radius:var(--radius);
+  padding:20px;
+  box-shadow:var(--shadow);
+  /* Ottimizzazione rendering */
+  contain: layout style;
+}
+
+.totals-card h3{
+  margin:0 0 16px 0;
+  font-size:1.1rem;
+  color:#fff;
+  /* Ottimizzazione rendering */
+  contain: layout style;
+}
+
+/* Energy grid ottimizzata */
+.energy-grid{
+  display:grid;
+  grid-template-columns:repeat(auto-fit, minmax(140px, 1fr));
+  gap:16px;
+  /* Ottimizzazione rendering */
+  contain: layout;
+}
+
+.energy-item{
+  text-align:center;
+  padding:16px 12px;
+  background:rgba(255,255,255,.03);
+  border:1px solid rgba(255,255,255,.1);
+  border-radius:12px;
+  transition: all 0.2s ease;
+  /* Ottimizzazione rendering */
+  contain: layout style;
+}
+
+.energy-item:hover{
+  background:rgba(255,255,255,.06);
+  border-color:rgba(255,255,255,.2);
+  transform:translateY(-2px);
+}
+
+.energy-icon{
+  font-size:2rem;
+  margin-bottom:8px;
+  /* Ottimizzazione rendering */
+  contain: layout style;
+}
+
+.energy-label{
+  font-size:.85rem;
+  color:var(--muted);
+  margin-bottom:8px;
+  font-weight:500;
+  /* Ottimizzazione rendering */
+  contain: layout style;
+}
+
+.energy-value{
+  font-size:1.8rem;
+  font-weight:700;
+  color:#fff;
+  font-family:monospace;
+  margin-bottom:4px;
+  /* Ottimizzazione rendering */
+  contain: layout style;
+}
+
+.energy-unit{
+  font-size:.75rem;
+  color:var(--muted);
+  font-weight:500;
+  /* Ottimizzazione rendering */
+  contain: layout style;
+}
+
+/* Colori specifici per ogni tipo di energia */
+.pv-energy .energy-icon{ color:var(--c-pv); }
+.batt-energy .energy-icon{ color:var(--c-batt); }
+.grid-energy .energy-icon{ color:var(--c-grid); }
+.load-energy .energy-icon{ color:var(--c-load); }
+
+.pv-energy .energy-value{ color:var(--c-pv); }
+.batt-energy .energy-value{ color:var(--c-batt); }
+.grid-energy .energy-value{ color:var(--c-grid); }
+.load-energy .energy-value{ color:var(--c-load); }
+
+.totals-grid{
+  display:grid;
+  grid-template-columns:repeat(auto-fit, minmax(120px, 1fr));
+  gap:16px;
+  /* Ottimizzazione rendering */
+  contain: layout;
+}
+
+.total-item{
+  text-align:center;
+  /* Ottimizzazione rendering */
+  contain: layout style;
+}
+
+.total-value{
+  font-size:1.5rem;
+  font-weight:700;
+  color:#fff;
+  font-family:monospace;
+  /* Ottimizzazione rendering */
+  contain: layout style;
+}
+
+.total-label{
+  font-size:.8rem;
+  color:var(--muted);
+  margin-top:4px;
+  /* Ottimizzazione rendering */
+  contain: layout style;
+}
+
+/* Histogram controls ottimizzati */
+.hist-controls{
+  display:flex;
+  align-items:center;
+  gap:16px;
+  margin:16px 0;
+  flex-wrap:wrap;
+  /* Ottimizzazione rendering */
+  contain: layout;
+}
+
+.hist-controls label{
+  display:flex;
+  align-items:center;
+  gap:8px;
+  cursor:pointer;
+  /* Ottimizzazione rendering */
+  contain: layout style;
+}
+
+.hist-controls input[type="checkbox"]{
+  width:16px;
+  height:16px;
+  /* Ottimizzazione rendering */
+  contain: layout style;
+}
+
+.hist-controls input[type="date"]{
+  padding:6px 10px;
+  border:1px solid var(--border);
+  border-radius:8px;
+  background:var(--surface);
+  color:var(--text);
+  /* Ottimizzazione rendering */
+  contain: layout style;
+}
+
+/* Responsive ottimizzato */
+@media (max-width: 768px) {
+  .container{
+    padding:12px;
+    /* Ottimizzazione mobile */
+    contain: layout style;
+  }
+  
+  .cards-row{
+    grid-template-columns:1fr;
+    gap:12px;
+    margin:16px 0;
+    /* Ottimizzazione mobile */
+    contain: layout;
+  }
+  
+  .charts-grid{
+    grid-template-columns:1fr;
+    gap:12px;
+    margin:16px 0;
+    /* Ottimizzazione mobile */
+    contain: layout;
+  }
+  
+  .chart-card canvas{
+    height:180px !important;
+    /* Ottimizzazione mobile */
+    contain: layout style;
+  }
+  
+  .totals-grid{
+    grid-template-columns:repeat(2, 1fr);
+    gap:12px;
+    /* Ottimizzazione mobile */
+    contain: layout;
+  }
+  
+  .energy-grid{
+    grid-template-columns:repeat(2, 1fr);
+    gap:12px;
+    /* Ottimizzazione mobile */
+    contain: layout;
+  }
+  
+  .energy-item{
+    padding:12px 8px;
+    /* Ottimizzazione mobile */
+    contain: layout style;
+  }
+  
+  .energy-icon{
+    font-size:1.5rem;
+    /* Ottimizzazione mobile */
+    contain: layout style;
+  }
+  
+  .energy-value{
+    font-size:1.4rem;
+    /* Ottimizzazione mobile */
+    contain: layout style;
+  }
+  
+  .hist-controls{
+    flex-direction:column;
+    align-items:stretch;
+    gap:12px;
+    /* Ottimizzazione mobile */
+    contain: layout;
+  }
+}
+
+/* Mobile specific optimizations */
+.mobile .container{
+  padding:8px;
+  /* Ottimizzazione mobile specifica */
+  contain: layout style;
+}
+
+.mobile .card{
+  padding:16px;
+  /* Ottimizzazione mobile specifica */
+  contain: layout style;
+}
+
+.mobile .chart-card{
+  padding:12px;
+  /* Ottimizzazione mobile specifica */
+  contain: layout style;
+}
+
+.mobile .chart-card canvas{
+  height:160px !important;
+  /* Ottimizzazione mobile specifica */
+  contain: layout style;
+}
+
+/* Utility classes ottimizzate */
+.sr-only{
+  position:absolute;
+  width:1px;
+  height:1px;
+  padding:0;
+  margin:-1px;
+  overflow:hidden;
+  clip:rect(0,0,0,0);
+  white-space:nowrap;
+  border:0;
+  /* Ottimizzazione accessibilità */
+  contain: layout style;
+}
+
+/* Animazioni ottimizzate per performance */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.fade-in {
+  animation: fadeIn 0.3s ease-out;
+  /* Ottimizzazione animazioni */
+  will-change: opacity, transform;
+}
+
+/* Loading states ottimizzati */
+.loading {
+  opacity: 0.6;
+  pointer-events: none;
+  /* Ottimizzazione loading */
+  transition: opacity 0.2s ease;
+}
+
+/* Focus management ottimizzato */
+*:focus {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+  /* Ottimizzazione focus */
+  transition: outline 0.15s ease;
+}
+
+/* Print styles ottimizzati */
+@media print {
+  .app-header,
+  .toolbar,
+  .btn,
+  .hist-controls {
+    display: none !important;
+  }
+  
+  .card,
+  .chart-card {
+    break-inside: avoid;
+    box-shadow: none;
+    border: 1px solid #ccc;
+  }
+  
+  body {
+    background: white;
+    color: black;
+  }
+}
+
+/* Nascondi completamente gli elementi con classe .hidden */
+.hidden {
+  display: none !important;
+  visibility: hidden !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+  position: absolute !important;
+  left: -9999px !important;
+  top: -9999px !important;
+}
+
+/* Badge per stato batteria */
+.badge {
+  display: inline-block;
+  padding: 4px 8px;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 500;
+  text-transform: lowercase;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  color: var(--text);
+}
+
+.badge-on {
+  background: rgba(76, 175, 80, 0.2);
+  border-color: rgba(76, 175, 80, 0.4);
+  color: #4CAF50;
+}
+
+.badge-off {
+  background: rgba(244, 67, 54, 0.2);
+  border-color: rgba(244, 67, 54, 0.4);
+  color: #F44336;
+}
+
+.badge-neutral {
+  background: rgba(255, 193, 7, 0.2);
+  border-color: rgba(255, 193, 7, 0.4);
+  color: #FFC107;
+}
+
+/* Colori dinamici per SOC e ciambella */
+.soc-display.charging {
+  color: var(--c-batt);
+}
+
+.soc-display.discharging {
+  color: #F44336;
+}
+
+.soc-display.neutral {
+  color: #FFC107;
+}
+
+.donut-wrap.compact.charging canvas {
+  filter: hue-rotate(0deg) saturate(1.2);
+}
+
+.donut-wrap.compact.discharging canvas {
+  filter: hue-rotate(320deg) saturate(1.2);
+}
+
+.donut-wrap.compact.neutral canvas {
+  filter: hue-rotate(45deg) saturate(1.2);
+}
+
+/* Layout compatto per donut chart batteria */
+.battery-status-row td {
+  vertical-align: middle;
+}
+
+.status-donut-container {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  justify-content: space-between;
+  position: relative;
+}
+
+.status-info {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: 1;
+  min-width: 80px;
+}
+
+.soc-display {
+  font-size: 14px;
+  font-weight: bold;
+  color: var(--c-batt);
+  text-align: left;
+}
+
+.donut-wrap.compact {
+  width: 40px;
+  height: 40px;
+  position: relative;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transform: translateY(-7px) translateX(+10px);
+}
+
+.donut-wrap.compact canvas {
+  width: 40px !important;
+  height: 40px !important;
+}
+
+/* Stile uniforme per tutte le voci nelle card */
+.card table tr td:first-child {
+  font-weight: 500;
+  color: var(--muted);
+  min-width: 120px;
+  width: 40%;
+  padding-right: 16px;
+}
+
+/* Stile per le unità di misura */
+.card table tr td:last-child {
+  font-weight: 600;
+  color: var(--text);
+  text-align: right;
+  font-family: monospace;
+  width: 60%;
+  word-break: break-word;
+  overflow-wrap: break-word;
+}
+
+/* Evidenziazione speciale per la potenza */
+.card table tr:first-child td:last-child {
+  font-weight: bold;
+  font-size: 1.1em;
+  color: var(--accent);
+  text-shadow: 0 0 10px rgba(59, 130, 246, 0.3);
+}
+
+/* Header card con ciambella integrata */
+.card-header-with-donut {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+}
+
+.card-header-with-donut h3 {
+  margin: 0;
+  flex: 1;
+}
+
+/* Container per percentuale e ciambella */
+.donut-status-container {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-shrink: 0;
+}
+
+.donut-status-container .soc-display {
+  font-size: 1.1rem;
+  font-weight: bold;
+  color: var(--c-batt);
+  text-align: right;
+  min-width: 60px;
+}
+
+.donut-status-container .donut-wrap.compact {
+  margin: 0;
+  transform: none;
+  flex-shrink: 0;
+}
+
+/* Stili specifici per tabelle nelle card */
+.card table {
+  width: 100%;
+  table-layout: fixed;
+  border-collapse: collapse;
+}
+
+.card table tr {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.card table tr:last-child {
+  border-bottom: none;
+}
+
+.card table td {
+  padding: 8px 0;
+  vertical-align: top;
+}
+
+/* Responsive per mobile */
+@media (max-width: 768px) {
+  /* Topbar responsive per mobile */
+  .topbar {
+    padding: 8px 12px;
+    flex-direction: column;
+    gap: 12px;
+    align-items: stretch;
+  }
+  
+  .topbar-buttons {
+    justify-content: center;
+    gap: 12px;
+  }
+  
+  .topbar-buttons .btn {
+    flex: 1;
+    justify-content: center;
+    padding: 8px 16px;
+    font-size: 0.95rem;
+  }
+  
+  .card-header-with-donut {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+  }
+  
+  .donut-status-container {
+    align-self: flex-end;
+    gap: 8px;
+  }
+  
+  .donut-status-container .soc-display {
+    font-size: 1rem;
+    min-width: 50px;
+  }
+  
+  .status-info {
+    gap: 8px;
+  }
+  
+  .soc-display {
+    font-size: 12px;
+  }
+  
+  .donut-wrap.compact {
+    width: 35px;
+    height: 35px;
+  }
+  
+  .donut-wrap.compact canvas {
+    width: 35px !important;
+    height: 35px !important;
+  }
+  
+  .card table tr:first-child td:last-child {
+    font-size: 1em;
+  }
+  
+  .card table tr td:first-child {
+    min-width: 100px;
+    font-size: 0.9em;
+  }
+  
+  .card table tr td:last-child {
+    font-size: 0.95em;
+  }
+}
+
+/* Responsive per desktop - correzione overflow valori */
+@media (min-width: 769px) {
+  .card-header-with-donut {
+    gap: 16px;
+  }
+  
+  .donut-status-container {
+    gap: 16px;
+  }
+  
+  .donut-status-container .soc-display {
+    font-size: 1.2rem;
+    min-width: 70px;
+  }
+  
+  .donut-status-container .donut-wrap.compact {
+    width: 45px;
+    height: 45px;
+  }
+  
+  .donut-status-container .donut-wrap.compact canvas {
+    width: 45px !important;
+    height: 45px !important;
+  }
+  
+  .card table tr td:first-child {
+    min-width: 140px;
+    width: 35%;
+  }
+  
+  .card table tr td:last-child {
+    width: 65%;
+    padding-left: 8px;
+  }
+  
+  /* Gestione speciale per valori lunghi */
+  .card table tr td:last-child {
+    overflow: visible;
+    white-space: nowrap;
+  }
+}

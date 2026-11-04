@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="g" x1="0" x2="0" y1="0" y2="1">
+      <stop offset="0" stop-color="#10b981"></stop>
+      <stop offset="1" stop-color="#064e3b"></stop>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="96" ry="96" fill="url(#g)"></rect>
+  <g fill="#f0fdf4">
+    <!-- fulmine stilizzato -->
+    <path d="M288 64 144 288h96l-16 160 160-256h-96z"></path>
+  </g>
+</svg>

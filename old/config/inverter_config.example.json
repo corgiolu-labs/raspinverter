@@ -1,0 +1,105 @@
+{
+  "serial": {
+    "port": "/dev/serial0",
+    "baudrate": 9600,
+    "parity": "N",
+    "stopbits": 1,
+    "bytesize": 8,
+    "timeout": 1.0,
+    "unit_id": 1
+  },
+  "polling": {
+    "interval_sec": 5
+  },
+  "battery": {
+    "type": "lifepo4",
+    "nominal_voltage": 51.2,
+    "nominal_ah": 500,
+    "soc": {
+      "method": "energy_balance",
+      "reset_voltage": 44.0
+    },
+    "net_reset_voltage": 46.0
+  },
+  "ui": {
+    "unit": "kW"
+  },
+  "relay": {
+    "mode": "gpio",
+    "enabled": true,
+    "gpio_pin": 17,
+    "active_high": true,
+    "on_v": 46,
+    "off_v": 50.5,
+    "min_toggle_sec": 5
+  },
+  "i2c": {
+    "enabled": true,
+    "bus": 1,
+    "devices": [
+      {
+        "type": "ads1115",
+        "name": "adc_mod1",
+        "address": 72,
+        "pga_v": 0.256,
+        "data_rate": 128,
+        "channels": [
+          {
+            "index": 0,
+            "name": "BATT1",
+            "amp_per_mv": 0.17
+          },
+          {
+            "index": 1,
+            "name": "BATT2",
+            "amp_per_mv": 0.17
+          },
+          {
+            "index": 2,
+            "name": "BATT3",
+            "amp_per_mv": 0.17
+          },
+          {
+            "index": 3,
+            "name": "BATT4",
+            "amp_per_mv": 0.17
+          }
+        ]
+      },
+      {
+        "type": "ads1115",
+        "name": "adc_mod2",
+        "address": 73,
+        "pga_v": 0.256,
+        "data_rate": 128,
+        "channels": [
+          {
+            "index": 0,
+            "name": "BATT5",
+            "amp_per_mv": 0.17
+          },
+          {
+            "index": 1,
+            "name": "SERIE1",
+            "divider_bottom_ohm": 100000,
+            "divider_top_ohm": 855500,
+            "display_unit": "V"
+          },
+          {
+            "index": 2,
+            "name": "SERIE2",
+            "divider_bottom_ohm": 100000,
+            "divider_top_ohm": 1805000,
+            "display_unit": "V",
+            "subtract_channel": "SERIE1"
+          },
+          {
+            "index": 3,
+            "name": "TOTBAT",
+            "amp_per_mv": 0.5
+          }
+        ]
+      }
+    ]
+  }
+}
