@@ -130,7 +130,7 @@ def poll_loop():
 
                 # Bilanciamento banchi (SERIE1/SERIE2 da I2C; gira ogni ciclo, indip. dal Modbus)
                 try:
-                    balance_step(LAST_I2C)
+                    balance_step(LAST_I2C, regs if isinstance(regs, dict) else None)
                 except Exception as _be:
                     print(f"[balance] step error: {_be}", flush=True)
 
@@ -207,9 +207,14 @@ def poll_loop():
                         except Exception:
                             hall_total_a = None
                         battery_v = s.get("battery_v")
-                        # corrente di carica per il coulomb counting: i Hall danno NEGATIVO in carica -> nego (>0 = carica)
-                        # fallback a battery_a (inverter) solo se i Hall non sono disponibili
-                        charge_a = (-hall_total_a) if hall_total_a is not None else s.get("battery_a")
+                        # corrente di carica per il coulomb counting (>0 = carica).
+                        # battery.soc.current_source: "inverter" (default) = totale misurato dall'inverter,
+                        # non risente di una batteria scollegata o di un Hall alla deriva;
+                        # "hall" = somma BATT1-5 (i Hall danno NEGATIVO in carica -> nego), con tutte le stringhe attive.
+                        if str(_get("battery.soc.current_source", "inverter")).lower() == "hall" and hall_total_a is not None:
+                            charge_a = -hall_total_a
+                        else:
+                            charge_a = s.get("battery_a")
 
                         # Controlla se e' necessario azzerare il contatore
                         if check_battery_reset_condition(battery_v, charge_a):
@@ -219,7 +224,7 @@ def poll_loop():
                         update_battery_counter(charge_a, battery_v)
 
                         # Auto-calibrazione PIENO (regola fisica + plausibilita' PV/giorno)
-                        full_i = hall_total_a if hall_total_a is not None else s.get("battery_a")
+                        full_i = charge_a
                         check_battery_full_condition(battery_v, full_i, s.get("pv_w"))
                     except Exception as e:
                         print(f"[battery] Errore aggiornamento contatore: {e}", flush=True)

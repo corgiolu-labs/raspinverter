@@ -566,8 +566,8 @@ def relay_setup(keep_state: bool = False):
 # ---------------------------------------------------------------------------
 # Bilanciamento banchi (schema definitivo 2026-07): 2 CARICATORI INDIPENDENTI isolati, uno SSR per
 # banco (SSR1=GPIO19=caricatore Banco1, SSR2=GPIO26=caricatore Banco2 - vedi balance_set).
-# Misura A IMPULSI (duty-cycle): lo switching del caricatore perturba l'ADC SERIE mentre carica,
-# quindi si carica a impulsi e si MISURA solo a caricatore SPENTO (lettura pulita) - vedi balance_step.
+# Caricatori sull'uscita dell'inverter: si carica a impulsi, si misura a caricatori spenti e pacco
+# quasi a riposo, e si interviene solo quando serve (surplus FV o squilibrio urgente) - vedi balance_step.
 # Default DISATTIVATO (balance.enabled=false): abilitare dopo aver verificato il cablaggio.
 # ---------------------------------------------------------------------------
 BALANCE_STATE: int = 0          # 0=nessuno, 1=banco1 (SERIE1), 2=banco2 (SERIE2)
@@ -578,6 +578,16 @@ _balance_manual_bank: int = 0
 _bal_phase: str = "idle"        # duty-cycle: "idle"(misura) / "charging"(impulso) / "settle"(attesa dopo off)
 _bal_phase_until: float = 0.0   # monotonic: fine della fase corrente
 _bal_session: bool = False      # True mentre un ciclo di bilanciamento e' in corso (isteresi start/stop)
+_bal_measures: list = []        # (monotonic, diff) validi: caricatori spenti e pacco quasi a riposo
+_bal_pending_bank: int = 0      # banco da caricare secondo l'ultima misura valida (0 = nessuno)
+_bal_pending_at: float = 0.0    # monotonic dell'ultima misura che ha confermato il banco
+_bal_last_median: Optional[float] = None   # ultima mediana diff (S1-S2) su finestra piena
+_bal_pulse_started: float = 0.0
+_bal_session_on_s: float = 0.0  # secondi di caricatore acceso nella sessione corrente
+_bal_day: str = ""
+_bal_day_on_s: float = 0.0      # secondi di caricatore acceso oggi (automatico, non test manuali)
+_bal_cooldown_until: float = 0.0
+_bal_reason: str = "avvio"
 
 def balance_setup():
     """Init GPIO dei 2 rele' di bilanciamento -> entrambi OFF (sicuro al boot)."""
@@ -648,79 +658,196 @@ def _bank_voltages(i2c):
         return c.get("value") if isinstance(c, dict) else c
     return _v(cfg.get("bank1_channel", "SERIE1")), _v(cfg.get("bank2_channel", "SERIE2"))
 
-def balance_step(i2c):
-    """Bilanciamento a IMPULSI (duty-cycle): lo switching del caricatore perturba l'ADC SERIE mentre
-    carica, quindi si MISURA solo a caricatore SPENTO (lettura pulita), poi si carica il banco piu'
-    basso per un impulso, si spegne, si assesta e si rimisura. Isteresi start/stop; OFF se disabilitato."""
-    global BALANCE_STATE, _bal_phase, _bal_phase_until, _bal_session
+def _bal_end_session(now: float, cooldown_s: float, reason: str):
+    """Chiude la sessione: niente piu' impulsi fino alla prossima misura valida (e al cooldown)."""
+    global _bal_session, _bal_session_on_s, _bal_pending_bank, _bal_cooldown_until, _bal_reason
+    had = _bal_session
+    _bal_session = False
+    _bal_session_on_s = 0.0
+    _bal_pending_bank = 0
+    if cooldown_s > 0:
+        _bal_cooldown_until = now + cooldown_s
+    _bal_reason = reason
+    if had:
+        print(f"[balance] sessione chiusa: {reason}", flush=True)
+
+
+def balance_step(i2c, ctx=None):
+    """Bilanciamento SOLO QUANDO SERVE. I caricatori stanno sull'uscita dell'inverter: ogni impulso
+    preleva dal pacco o dal FV, con perdite. Quindi:
+    - MISURA: mediana di diff su una finestra (measure_window_s), solo a caricatori spenti da
+      settle_seconds e con corrente pacco in [-rest_discharge_a, +rest_charge_a]. Sotto carica FV
+      forte, sotto carico alto o senza Modbus (Banco2 non derivato) la misura non e' valida.
+    - DECISIONE: parte a start_diff_v; in sessione si chiude a stop_diff_v, che deve stare sopra il
+      rumore di misura, o se il banco piu' basso si inverte (superato il pareggio).
+    - ENERGIA: si carica solo con surplus FV (pv - load >= min_surplus_w), salvo squilibrio urgente
+      (urgent_diff_v) che protegge dal distacco BMS del banco debole.
+    - TETTI: max_minutes per sessione, max_minutes_day al giorno (non vale per l'urgente),
+      cooldown_minutes tra una sessione e l'altra, misura vecchia scartata dopo pending_max_hours.
+    ctx = dati Modbus del ciclo (battery_a, pv_w, load_w); None se l'inverter non risponde."""
+    global BALANCE_STATE, _bal_phase, _bal_phase_until, _bal_session, _bal_measures, _bal_pending_bank
+    global _bal_pending_at, _bal_last_median, _bal_pulse_started, _bal_session_on_s, _bal_day
+    global _bal_day_on_s, _bal_reason
     cfg = CONF.get("balance", {})
     now = time.monotonic()
     # Override manuale (test cablaggio): tiene il banco scelto per N secondi
     if now < _balance_manual_until:
         if BALANCE_STATE != _balance_manual_bank:
             balance_set(_balance_manual_bank)
+        _bal_measures = []
+        _bal_reason = "test manuale"
         return
     if not bool(cfg.get("enabled", False)) or GPIO_BACKEND is None:
         if BALANCE_STATE != 0:
             balance_set(0)
-        _bal_phase = "idle"; _bal_session = False
+        _bal_phase = "idle"; _bal_session = False; _bal_pending_bank = 0
+        _bal_session_on_s = 0.0; _bal_measures = []
+        _bal_reason = "disabilitato"
         return
 
-    pulse_s = float(cfg.get("pulse_seconds", 60))
-    settle_s = float(cfg.get("settle_seconds", 8))
+    pulse_s = float(cfg.get("pulse_seconds", 300))
+    settle_s = float(cfg.get("settle_seconds", 30))
     start_diff = float(cfg.get("start_diff_v", 0.3))
-    stop_diff = float(cfg.get("stop_diff_v", 0.1))
+    stop_diff = float(cfg.get("stop_diff_v", 0.15))
+    urgent_diff = float(cfg.get("urgent_diff_v", 0.6))
     max_bank_v = float(cfg.get("max_bank_v", 28.0))
+    window_s = float(cfg.get("measure_window_s", 60))
+    min_samples = int(cfg.get("measure_min_samples", 8))
+    rest_chg = float(cfg.get("rest_charge_a", 5))
+    rest_dis = float(cfg.get("rest_discharge_a", 15))
+    min_surplus = float(cfg.get("min_surplus_w", 300))
+    max_session_s = float(cfg.get("max_minutes", 30)) * 60.0
+    max_day_s = float(cfg.get("max_minutes_day", 120)) * 60.0
+    cooldown_s = float(cfg.get("cooldown_minutes", 60)) * 60.0
+    pending_max_s = float(cfg.get("pending_max_hours", 18)) * 3600.0
 
-    # Fase CARICA: impulso in corso -> NON leggere (lettura perturbata), tieni acceso
+    # Impulso in corso: lettura perturbata, si ignora. Durata fissa.
     if _bal_phase == "charging":
         if now < _bal_phase_until:
             return
-        balance_set(0)                          # fine impulso -> spegni il caricatore
-        _bal_phase = "settle"; _bal_phase_until = now + settle_s
-        return
-    # Fase SETTLE: caricatore spento, aspetta che la lettura si pulisca
-    if _bal_phase == "settle":
-        if now < _bal_phase_until:
-            return
-        _bal_phase = "idle"                     # pronto a misurare
-
-    # Fase MISURA/DECIDI: caricatore SPENTO -> lettura pulita e affidabile
-    s1, s2 = _bank_voltages(i2c)
-    if s1 is None or s2 is None:
-        if BALANCE_STATE != 0:
-            balance_set(0)
-        return
-    s1 = float(s1); s2 = float(s2)
-    diff = s1 - s2
-    thr = stop_diff if _bal_session else start_diff   # isteresi: parte a start_diff, continua fino a stop_diff
-    if abs(diff) >= thr:
-        lower = 1 if s1 < s2 else 2
-        lower_v = s1 if lower == 1 else s2
-        if lower_v < max_bank_v:
-            _bal_session = True
-            balance_set(lower)                  # accendi il caricatore del banco piu' basso
-            _bal_phase = "charging"; _bal_phase_until = now + pulse_s
-            return
-    # bilanciato o banco pieno -> chiudi il ciclo, resta spento
-    _bal_session = False
-    if BALANCE_STATE != 0:
+        on_s = max(0.0, now - _bal_pulse_started)
+        _bal_session_on_s += on_s
+        _bal_day_on_s += on_s
         balance_set(0)
+        _bal_phase = "settle"
+        _bal_measures = []
+        _bal_reason = "assestamento dopo impulso"
+        return
+    if BALANCE_STATE != 0:                      # fine test manuale
+        balance_set(0)
+        _bal_measures = []
+        return
+
+    day = time.strftime("%Y-%m-%d")
+    if day != _bal_day:
+        _bal_day = day
+        _bal_day_on_s = 0.0
+
+    settled = (now - BALANCE_LAST_TOGGLE) >= settle_s
+    _bal_phase = "idle" if settled else "settle"
+
+    # MISURA
+    s1, s2 = _bank_voltages(i2c)
+    ctx = ctx if isinstance(ctx, dict) else {}
+    amps = ctx.get("battery_a")
+    at_rest = amps is not None and -rest_dis <= float(amps) <= rest_chg
+    valid = settled and at_rest and s1 is not None and s2 is not None
+    if valid:
+        _bal_measures.append((now, float(s1) - float(s2)))
+    _bal_measures = [m for m in _bal_measures if now - m[0] <= window_s]
+    median = None
+    if len(_bal_measures) >= max(1, min_samples):
+        vals = sorted(m[1] for m in _bal_measures)
+        n = len(vals)
+        median = vals[n // 2] if n % 2 else (vals[n // 2 - 1] + vals[n // 2]) / 2.0
+
+    # DECISIONE (solo su finestra piena)
+    if median is not None:
+        _bal_last_median = median
+        lower = 1 if median < 0 else 2
+        if _bal_session:
+            if abs(median) <= stop_diff:
+                _bal_end_session(now, cooldown_s, f"bilanciati, diff {median:+.2f} V")
+                return
+            if lower != _bal_pending_bank:
+                _bal_end_session(now, cooldown_s, f"pareggio superato, diff {median:+.2f} V")
+                return
+            _bal_pending_at = now
+        elif abs(median) >= start_diff:
+            _bal_pending_bank = lower
+            _bal_pending_at = now
+        else:
+            _bal_pending_bank = 0
+            _bal_reason = f"bilanciati, diff {median:+.2f} V"
+
+    if not _bal_pending_bank:
+        if median is None and not _bal_session:
+            _bal_reason = "misura in corso" if at_rest else "pacco non a riposo, misura sospesa"
+        return
+
+    # AZIONE
+    if now - _bal_pending_at > pending_max_s:
+        _bal_end_session(now, 0.0, "misura troppo vecchia, da rifare")
+        return
+    if not settled:
+        return
+    if _bal_session and at_rest and median is None:
+        _bal_reason = "verifica dopo impulso"   # il pacco e' a riposo: prima si rimisura
+        return
+    if now < _bal_cooldown_until:
+        _bal_reason = "squilibrio rilevato, pausa tra sessioni"
+        return
+    if _bal_session_on_s >= max_session_s:
+        _bal_end_session(now, cooldown_s, "tetto di sessione raggiunto")
+        return
+    urgent = _bal_last_median is not None and abs(_bal_last_median) >= urgent_diff
+    if _bal_day_on_s >= max_day_s and not urgent:
+        _bal_reason = "tetto giornaliero raggiunto"
+        return
+    lower_v = s1 if _bal_pending_bank == 1 else s2
+    if lower_v is None:
+        return
+    if float(lower_v) >= max_bank_v:
+        _bal_end_session(now, cooldown_s, f"banco {_bal_pending_bank} gia' a {float(lower_v):.1f} V")
+        return
+    if not urgent:
+        pv = ctx.get("pv_w"); load = ctx.get("load_w")
+        if pv is None or load is None or (float(pv) - float(load)) < min_surplus:
+            _bal_reason = f"squilibrio rilevato, attendo surplus FV >= {min_surplus:.0f} W"
+            return
+    _bal_session = True
+    balance_set(_bal_pending_bank)
+    _bal_phase = "charging"
+    _bal_pulse_started = now
+    _bal_phase_until = now + pulse_s
+    _bal_measures = []
+    _bal_reason = "urgente" if urgent else "surplus FV"
+    print(f"[balance] impulso {pulse_s:.0f}s Banco{_bal_pending_bank} ({_bal_reason}), "
+          f"diff {_bal_last_median if _bal_last_median is not None else 0:+.2f} V", flush=True)
+
 
 def balance_status(i2c=None):
     """Stato corrente per UI/endpoint."""
     cfg = CONF.get("balance", {})
     s1, s2 = _bank_voltages(i2c)
     diff = (float(s1) - float(s2)) if (s1 is not None and s2 is not None) else None
-    manual_left = max(0.0, _balance_manual_until - time.monotonic())
+    now = time.monotonic()
+    manual_left = max(0.0, _balance_manual_until - now)
     return {
         "enabled": bool(cfg.get("enabled", False)),
         "charging_bank": BALANCE_STATE,
         "phase": _bal_phase,
+        "reason": _bal_reason,
+        "pending_bank": _bal_pending_bank,
+        "median_diff_v": round(_bal_last_median, 3) if _bal_last_median is not None else None,
+        "measures_in_window": len(_bal_measures),
+        "session_on_min": round(_bal_session_on_s / 60.0, 1),
+        "day_on_min": round(_bal_day_on_s / 60.0, 1),
+        "cooldown_left_min": round(max(0.0, _bal_cooldown_until - now) / 60.0, 1),
         "serie1_v": s1, "serie2_v": s2,
         "diff_v": round(diff, 3) if diff is not None else None,
         "start_diff_v": float(cfg.get("start_diff_v", 0.3)),
-        "stop_diff_v": float(cfg.get("stop_diff_v", 0.1)),
+        "stop_diff_v": float(cfg.get("stop_diff_v", 0.15)),
         "max_bank_v": float(cfg.get("max_bank_v", 28.0)),
         "manual_test_sec_left": round(manual_left, 1),
         "gpio": [int(cfg.get("gpio_pin_bank1", 19)), int(cfg.get("gpio_pin_bank2", 26))],
