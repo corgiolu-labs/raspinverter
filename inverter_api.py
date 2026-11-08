@@ -41,6 +41,9 @@ from hardware import (
     _gpio_setup_output, _gpio_write, _gpio_read, _gpio_cleanup, GPIO_BACKEND,
     balance_setup, balance_set, balance_manual, balance_step, balance_status,
 )
+from string_watch import StringWatch
+
+STRING_WATCH = StringWatch()   # batterie che smettono di condurre (BMS / scollegate)
 
 print(f"[startup] Flask imported successfully", flush=True)
 
@@ -192,6 +195,12 @@ def poll_loop():
                     except Exception:
                         pass
                     
+                    # Controllo batterie: non deve mai poter fermare il poll
+                    try:
+                        STRING_WATCH.update(time.monotonic(), i2c_snapshot, s.get("battery_a"), CONF.get("string_watch"))
+                    except Exception as _swe:
+                        print(f"[strings] errore: {_swe}", flush=True)
+
                     # Battery counter management
                     try:
                         # corrente totale dai sensori Hall tarati (somma BATT1-5)
@@ -1324,6 +1333,11 @@ def battery_autocal():
         "hold_seconds": float(_get("battery.autocal.hold_seconds", 600)),
         "min_pv_w": float(_get("battery.autocal.min_pv_w", 50.0)),
     })
+
+@app.route("/api/strings")
+def strings_status():
+    """Batterie che risultano non condurre (per l'avviso in dashboard)."""
+    return jsonify(STRING_WATCH.status())
 
 @app.route("/api/balance", methods=["GET", "POST"])
 def balance_api():

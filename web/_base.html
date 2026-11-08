@@ -23,6 +23,7 @@
       </div>
     </div>
     {% block banner %}<div id="errorBanner" class="banner" role="alert" aria-live="polite" hidden></div>{% endblock %}
+    <div id="stringAlert" class="banner warn" role="alert" aria-live="polite" hidden></div>
   </header>
 
   <nav class="tabnav container" aria-label="Sezioni dashboard">
@@ -44,6 +45,21 @@
 
   <footer class="container foot"><small>{% block footer %}Monitor inverter off-grid{% endblock %}</small></footer>
 
+  <script>
+  (function () {
+    var box = document.getElementById('stringAlert');
+    if (!box) return;
+    function poll() {
+      fetch('/api/strings', { cache: 'no-store' }).then(function (r) { return r.json(); }).then(function (d) {
+        var a = (d && d.alerts) || [];
+        box.textContent = a.length ? '\u26A0 ' + a.map(function (x) { return x.message; }).join(' \u00B7 ') : '';
+        box.hidden = !a.length;
+      }).catch(function () { /* offline: lascia lo stato attuale */ });
+    }
+    poll();
+    setInterval(poll, 30000);
+  })();
+  </script>
   {% block scripts %}{% endblock %}
 </body>
 </html>

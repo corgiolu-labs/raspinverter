@@ -83,6 +83,14 @@
     "pending_max_hours": 18,
     "min_toggle_sec": 10
   },
+  "string_watch": {
+    "enabled": true,
+    "window_s": 600,
+    "min_pack_a": 15,
+    "min_pack_std_a": 1.5,
+    "flat_std_a": 0.25,
+    "need_windows": 3
+  },
   "apply": {
     "soc_calibration": false,
     "balance": false,
