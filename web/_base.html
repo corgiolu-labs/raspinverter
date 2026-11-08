@@ -6,6 +6,7 @@
   <meta name="theme-color" content="#0f172a" />
   <title>{% block title %}Inverter{% endblock %}</title>
   <link rel="stylesheet" href="/main.css?v=20260606" />
+  <style>@media (max-width:480px){.bal-prefix{display:none}.toolbar{flex-wrap:wrap;justify-content:flex-end}}</style>
   <link rel="manifest" href="/manifest.webmanifest" />
   <link rel="icon" href="/icons/icon.svg" type="image/svg+xml" />
   <link rel="apple-touch-icon" href="/icons/icon-192.png" />
@@ -18,12 +19,14 @@
       <div class="toolbar">
         <button id="btnRefresh" class="btn" type="button">Aggiorna</button>
         <button id="btnInstall" class="btn btn--secondary" type="button" style="display:none" title="Installa l'app sul dispositivo">Installa app</button>
+        <span id="balBadge" class="badge" style="background:#1e293b;color:#cbd5e1" role="status" title="Stato dei bilanciatori">⚖ <span class="bal-prefix">Bilanciatori: </span><span id="balBadgeState">…</span></span>
         <span id="lastUpdate" class="badge" style="opacity:.7" role="status" aria-label="Ultimo aggiornamento">--:--</span>
         <span id="connBadge" class="badge badge-off" role="status" aria-live="polite">OFF LINE</span>
       </div>
     </div>
     {% block banner %}<div id="errorBanner" class="banner" role="alert" aria-live="polite" hidden></div>{% endblock %}
     <div id="stringAlert" class="banner warn" role="alert" aria-live="polite" hidden></div>
+    <div id="balanceActive" class="banner ok" style="background:#047857;color:#ecfdf5;border-color:#10b981;font-weight:600;animation:none" role="status" aria-live="polite" hidden></div>
   </header>
 
   <nav class="tabnav container" aria-label="Sezioni dashboard">
@@ -33,7 +36,6 @@
     <a href="/grid-home" data-p="/grid-home" class="tab">⚡ Rete &amp; Casa</a>
     <a href="/history" data-p="/history" class="tab">📈 Storico</a>
     <a href="/analysis" data-p="/analysis" class="tab">🧠 Analisi</a>
-    <a href="/stato-batterie" data-p="/stato-batterie" class="tab">🔬 Stato batterie</a>
     <a href="/diagnostics" data-p="/diagnostics" class="tab">🔧 Diagnostica</a>
     <a href="/settings" data-p="/settings" class="tab">⚙️ Impostazioni</a>
   </nav>
@@ -58,6 +60,35 @@
     }
     poll();
     setInterval(poll, 30000);
+  })();
+  (function () {
+    var box = document.getElementById('balanceActive');
+    if (!box) return;
+    function text(b) {
+      if (b.manual_test_sec_left > 0 && b.charging_bank) return '⚖ Test manuale: caricatore del Banco ' + b.charging_bank + ' acceso';
+      if (b.charging_bank) {
+        var left = b.pulse_left_s > 0 ? ' · impulso ancora ' + Math.ceil(b.pulse_left_s / 60) + ' min' : '';
+        return '⚖ Bilanciamento in corso: caricatore del Banco ' + b.charging_bank + ' acceso' + left;
+      }
+      if (b.session) return '⚖ Bilanciamento in corso: caricatori spenti per la misura tra due impulsi';
+      return '';
+    }
+    function poll() {
+      fetch('/api/balance', { cache: 'no-store' }).then(function (r) { return r.json(); }).then(function (b) {
+        var t = text(b || {});
+        box.textContent = t;
+        box.hidden = !t;
+        var pill = document.getElementById('balBadge'), st = document.getElementById('balBadgeState');
+        if (pill && st && b) {
+          var active = !!(b.charging_bank || b.session);
+          st.textContent = b.enabled === false ? 'off' : (active ? 'attivi' : (b.pending_bank ? 'in attesa' : 'fermi'));
+          pill.style.background = active ? '#047857' : '#1e293b';
+          pill.style.color = active ? '#ecfdf5' : '#cbd5e1';
+        }
+      }).catch(function () { /* offline: lascia lo stato attuale */ });
+    }
+    poll();
+    setInterval(poll, 10000);
   })();
   </script>
   {% block scripts %}{% endblock %}

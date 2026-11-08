@@ -1,156 +1,399 @@
 {% extends "_base.html" %}
 {% block title %}Batteria · Inverter{% endblock %}
 {% block brand %}🔋 Batteria{% endblock %}
-{% block head_extra %}<script src="/chart.umd.min.js"></script>{% endblock %}
-{% block footer %}Batteria · stato, taratura SOC e correnti per-cella (I2C/ADS1115){% endblock %}
+{% block head_extra %}
+<script src="/chart.umd.min.js"></script>
+{% raw %}
+<style>
+  .bs-grid { display:grid; gap:12px; grid-template-columns:repeat(auto-fit,minmax(280px,1fr)); margin-bottom:12px; }
+  .bs-grid .wide { grid-column:1 / -1; }
+  .kpi-row { display:flex; flex-wrap:wrap; gap:18px; }
+  .kpi { font-size:1.5rem; font-weight:700; font-variant-numeric:tabular-nums; }
+  .kpi-label { font-size:.78rem; color:var(--muted); }
+  .note { color:var(--muted); font-size:.82rem; margin-top:8px; }
+  .bs-table { width:100%; border-collapse:collapse; font-size:.9rem; font-variant-numeric:tabular-nums; }
+  .bs-table th { text-align:right; color:var(--muted); font-weight:500; padding:4px 6px; border-bottom:1px solid rgba(255,255,255,.12); }
+  .bs-table td { text-align:right; padding:4px 6px; border-bottom:1px solid rgba(255,255,255,.05); color:var(--text) !important; font-family:inherit !important; font-size:.9rem !important; font-weight:400 !important; }
+  .bs-table th:first-child, .bs-table td:first-child { text-align:left; }
+  .bs-table tfoot td { font-weight:700 !important; border-top:1px solid rgba(255,255,255,.2); }
+  .scroll-x { overflow-x:auto; }
+  .tag { display:inline-block; padding:1px 8px; border-radius:999px; font-size:.74rem; }
+  .tag.ok { background:rgba(34,197,94,.18); color:#4ade80; }
+  .tag.sat { background:rgba(148,163,184,.2); color:#cbd5e1; }
+  .tag.bad { background:rgba(245,158,11,.2); color:#f59e0b; }
+  .weak { color:#f59e0b !important; font-weight:700; }
+  .hero { margin-bottom:12px; padding:18px 18px 14px; }
+  .hero-head { display:flex; flex-wrap:wrap; justify-content:space-between; align-items:flex-start; gap:12px; }
+  .hero-head h3 { margin:0; font-size:1.15rem; }
+  .hero-sub { color:var(--muted); font-size:.82rem; margin-top:2px; }
+  .hero-ctl { display:flex; align-items:center; gap:8px; }
+  .hero-ctl input { background:var(--surface); color:var(--text); border:1px solid var(--border); border-radius:8px; padding:6px 8px; color-scheme:dark; }
+  .legend { display:flex; flex-wrap:wrap; gap:8px 26px; margin:14px 0 8px; }
+  .leg { display:flex; align-items:center; gap:8px; font-size:.85rem; color:var(--muted); }
+  .leg b { color:var(--text); font-size:1.15rem; font-variant-numeric:tabular-nums; }
+  .key { display:inline-block; width:18px; height:2px; border-radius:2px; }
+  .plot { position:relative; }
+  .empty { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; color:var(--muted); font-size:.9rem; pointer-events:none; }
+  .empty[hidden] { display:none; }
+  details.data { margin-top:6px; font-size:.82rem; color:var(--muted); }
+  details.data summary { cursor:pointer; }
+  .cmd-group + .cmd-group { margin-top:16px; padding-top:14px; border-top:1px solid rgba(255,255,255,.08); }
+  .cmd-title { font-weight:600; margin-bottom:4px; }
+  .cmd-row { display:flex; gap:8px; flex-wrap:wrap; margin-top:8px; }
+  .cmd-check { display:flex; align-items:center; gap:8px; margin-top:10px; font-size:.9rem; cursor:pointer; }
+</style>
+{% endraw %}
+{% endblock %}
+{% block footer %}Batteria · dati misurati e comandi di taratura{% endblock %}
 {% block content %}
-    <section class="cards-row">
-      <div class="card">
-        <div class="card-header-with-donut">
-          <h3>🔋 Batteria</h3>
-          <div class="donut-status-container">
-            <div class="soc-display"><span id="soc_label">-</span></div>
-            <div class="donut-wrap compact"><canvas id="batteryDonut" aria-label="SOC batteria" role="img"></canvas></div>
-          </div>
-        </div>
-        <div class="card-content">
-          <table>
-            <tr><td>Potenza</td><td id="battery_power">-</td></tr>
-            <tr><td>Tensione</td><td id="battery_v">-</td></tr>
-            <tr><td>Corrente</td><td id="battery_a">-</td></tr>
-            <tr class="battery-status-row">
-              <td>Stato</td>
-              <td><div class="status-info"><span id="battery_state">-</span></div></td>
-            </tr>
-          </table>
-          <div class="chart-container" id="chartContainerBattery" style="display:block; margin-top:12px;">
-            <canvas id="chartBatt" role="img" aria-label="Batteria"></canvas>
-          </div>
-        </div>
-      </div>
+<section class="card hero" aria-labelledby="balTitle">
+  <div class="hero-head">
+    <div>
+      <h3 id="balTitle">⚖️ Bilanciamento banchi</h3>
+      <div class="hero-sub">Mediana ogni 2 minuti. In carica forte e durante gli impulsi dei caricatori la differenza può risultare falsata.</div>
+    </div>
+    <div class="hero-ctl">
+      <input type="date" id="histDate" aria-label="Giorno da visualizzare" />
+      <button id="histToday" class="btn btn--secondary" type="button">Oggi</button>
+    </div>
+  </div>
+  <div class="legend">
+    <div class="leg"><span class="key" style="background:#3987e5"></span>Banco 1 <b id="lastB1">—</b></div>
+    <div class="leg"><span class="key" style="background:#d95926"></span>Banco 2 <b id="lastB2">—</b></div>
+    <div class="leg"><span class="key" style="background:#e5e7eb"></span>Differenza <b id="lastDiff">—</b></div>
+  </div>
+  <div class="plot" style="height:300px"><canvas id="chartBanks" role="img" aria-label="Tensione dei due banchi nel giorno selezionato"></canvas><div class="empty" id="banksEmpty" hidden>Nessun dato per questo giorno</div></div>
+  <div class="plot" style="height:150px;margin-top:4px"><canvas id="chartDiff" role="img" aria-label="Differenza di tensione tra banco 1 e banco 2, con le soglie di intervento"></canvas></div>
+  <details class="data"><summary>Dati in tabella</summary><div class="scroll-x"><table class="bs-table"><thead><tr><th>Ora</th><th>Banco 1 (V)</th><th>Banco 2 (V)</th><th>Differenza (V)</th></tr></thead><tbody id="histTable"></tbody></table></div></details>
+</section>
 
-      <div class="card">
-        <h3>🧪 I2C / ADC (celle)</h3>
-        <div class="card-content">
-          <div id="i2c_container">
-            <table id="i2c_table" aria-label="Letture I2C/ADC">
-              <tr><td>Stato</td><td id="i2c_status">Nessun dato</td></tr>
-            </table>
-          </div>
-        </div>
-      </div>
-    </section>
+<section class="bs-grid">
+  <div class="card">
+    <h3>🔋 Pacco</h3>
+    <div class="kpi-row">
+      <div><div class="kpi" id="soc">—</div><div class="kpi-label">SOC</div></div>
+      <div><div class="kpi" id="volt">—</div><div class="kpi-label">Tensione</div></div>
+      <div><div class="kpi" id="amp">—</div><div class="kpi-label">Corrente inverter</div></div>
+    </div>
+    <div class="note" id="capNote"></div>
+  </div>
 
-    <!-- Taratura SOC (conteggio energetico) -->
-    <section class="cards-row">
-      <div class="card">
-        <h3>🎛️ Taratura SOC (batteria)</h3>
-        <p style="color:var(--muted);font-size:.9rem;margin:.2rem 0 .6rem">
-          Il SOC usa il <strong>conteggio energetico</strong>. Premi <strong>Carica 100%</strong> quando la batteria è
-          completamente carica e <strong>Azzera (vuoto)</strong> quando è al minimo: i due punti tarano il calcolo.
-        </p>
-        <div id="battCalInfo" style="margin-bottom:10px;font-size:.9rem;color:var(--muted)">Stato: caricamento…</div>
-        <div style="display:flex;gap:8px;flex-wrap:wrap">
-          <button id="btnBatteryFull" class="btn" type="button">🔋 Carica 100%</button>
-          <button id="btnBatteryReset" class="btn btn--danger" type="button">🪫 Azzera (vuoto)</button>
-        </div>
-        <label style="display:flex;align-items:center;gap:8px;margin-top:12px;font-size:.9rem;cursor:pointer">
-          <input type="checkbox" id="autocalEnabled" />
-          🤖 Auto-calibrazione al pieno (rileva la carica completa e tara il 100% da solo)
-        </label>
-        <div id="battCalOut" style="margin-top:10px;font-size:.85rem;color:var(--muted)">—</div>
-      </div>
-    </section>
+  <div class="card">
+    <h3>⚖️ Banchi e bilanciatori</h3>
+    <div class="kpi-row">
+      <div><div class="kpi" id="b1">—</div><div class="kpi-label">Banco 1</div></div>
+      <div><div class="kpi" id="b2">—</div><div class="kpi-label">Banco 2</div></div>
+      <div><div class="kpi" id="med">—</div><div class="kpi-label">Differenza a riposo</div></div>
+      <div><div class="kpi" id="onMin">—</div><div class="kpi-label">Caricatori accesi oggi</div></div>
+    </div>
+    <div class="note" id="balNote"></div>
+  </div>
 
-    <!-- Bilanciamento banchi -->
-    <section class="cards-row">
-      <div class="card">
-        <h3>⚖️ Bilanciamento banchi</h3>
-        <p style="color:var(--muted);font-size:.9rem;margin:.2rem 0 .6rem">
-          Commuta un caricatore 24V <strong>isolato</strong> sul banco più scarico (SERIE1/SERIE2) finché si riallineano.
-          <strong>Verifica il cablaggio coi tasti Test (scheda 🔧 Diagnostica) prima di attivare l'automatico.</strong>
-        </p>
-        <div id="balInfo" style="margin-bottom:10px;font-size:.9rem;color:var(--muted)">Stato: caricamento…</div>
-        <label style="display:flex;align-items:center;gap:8px;margin-bottom:10px;font-size:.9rem;cursor:pointer">
-          <input type="checkbox" id="balEnabled" />
-          Abilita bilanciamento automatico
-        </label>
-        <p style="font-size:.82rem;color:var(--muted);margin:.2rem 0 0">🔌 I test manuali dei relè sono nella scheda <strong>🔧 Diagnostica</strong> (più sicuro: ci si entra apposta).</p>
-        <div id="balOut" style="margin-top:10px;font-size:.85rem;color:var(--muted)">—</div>
-      </div>
-    </section>
+  <div class="card">
+    <h3>🧲 Correnti per batteria</h3>
+    <table class="bs-table"><thead><tr><th>Canale</th><th>Corrente</th><th>Stato</th></tr></thead><tbody id="chans"></tbody></table>
+    <div class="note">Positivo in carica, negativo in scarica. "Saturo": il sensore è a fondo scala e la scarica reale è più alta. Per il SOC si usa la corrente dell'inverter.</div>
+  </div>
 
-    <section class="chart-wide">
-      <div class="card hist-controls">
-        <label>Storico celle — Data</label>
-        <input type="date" id="i2cDate" />
-        <button id="i2cApply" class="btn" type="button">Applica</button>
+  <div class="card">
+    <h3>🔬 Capacità misurate al tester</h3>
+    <table class="bs-table"><thead><tr><th>N.</th><th>Gruppo bk1 (Ah)</th><th>Gruppo bk2 (Ah)</th></tr></thead><tbody id="tests"></tbody><tfoot id="testsFoot"></tfoot></table>
+    <div class="note" id="testNote"></div>
+  </div>
+
+  <div class="card wide">
+    <h3>📈 Potenza batteria</h3>
+    <div class="chart-container" id="chartContainerBattery" style="display:block;">
+      <canvas id="chartBatt" role="img" aria-label="Potenza batteria"></canvas>
+    </div>
+  </div>
+</section>
+
+<section class="card" style="margin-bottom:12px">
+  <h3>🧲 Correnti delle batterie</h3>
+  <div class="legend" id="curLegend"></div>
+  <div class="plot" style="height:240px"><canvas id="chartCurrents" role="img" aria-label="Corrente di ogni batteria nel giorno selezionato"></canvas></div>
+  <div class="note">Positivo in carica, negativo in scarica. In scarica i sensori saturano presto: le correnti negative alte risultano tagliate.</div>
+</section>
+
+<section class="bs-grid">
+  <div class="card wide">
+    <h3>📅 Energia degli ultimi 14 giorni (kWh)</h3>
+    <div class="scroll-x">
+      <table class="bs-table"><thead><tr><th>Giorno</th><th>Solare</th><th>Casa</th><th>Rete</th><th>In batteria</th><th>Da batteria</th></tr></thead><tbody id="daily"></tbody></table>
+    </div>
+  </div>
+
+  <div class="card wide">
+    <h3>🎛️ Comandi</h3>
+    <div class="cmd-group">
+      <div class="cmd-title">Taratura SOC</div>
+      <div class="note" style="margin-top:0">Il SOC conta la corrente misurata dall'inverter. Premi <b>Carica 100%</b> solo a batteria davvero piena e <b>Azzera</b> solo a batteria al minimo.</div>
+      <div class="cmd-row">
+        <button id="btnBatteryFull" class="btn" type="button">🔋 Carica 100%</button>
+        <button id="btnBatteryReset" class="btn btn--danger" type="button">🪫 Azzera (vuoto)</button>
       </div>
-      <div class="chart-card"><canvas id="chartI2C" role="img" aria-label="Storico batterie: SERIE1, SERIE2, BATT1-5"></canvas></div>
-    </section>
+      <label class="cmd-check"><input type="checkbox" id="autocalEnabled" /> Auto-calibrazione al pieno (rileva la carica completa e tara il 100% da solo)</label>
+      <div class="note" id="battCalOut"></div>
+    </div>
+    <div class="cmd-group">
+      <div class="cmd-title">Bilanciamento banchi</div>
+      <div class="note" style="margin-top:0">Due caricatori isolati, uno per banco, comandati dagli SSR. Si accendono solo se a riposo la differenza supera la soglia, con surplus solare o squilibrio urgente. I test manuali sono in <b>🔧 Diagnostica</b>.</div>
+      <label class="cmd-check"><input type="checkbox" id="balEnabled" /> Bilanciamento automatico</label>
+      <div class="note" id="balOut"></div>
+    </div>
+  </div>
+</section>
 {% endblock %}
 {% block scripts %}
-<script src="/app.mod.js?v=20260609"></script>
+<script src="/app.mod.js?v=20261108"></script>
 {% raw %}
 <script>
-// Taratura SOC: Carica 100% (net = capacita') / Azzera (net = 0)
-(function(){
-  var info=document.getElementById('battCalInfo'), out=document.getElementById('battCalOut');
-  function setOut(t){ if(out) out.textContent=t; }
-  async function refresh(){
-    try{
-      var inv=await (await fetch('/api/inverter')).json();
-      var soc=(inv && inv.soc_pct!=null)? Number(inv.soc_pct).toFixed(1)+'%' : '—';
-      var net=(inv && inv.battery_net_wh!=null)? (inv.battery_net_wh/1000).toFixed(2)+' kWh' : '—';
-      var since='—';
-      try{ var st=await (await fetch('/api/battery/status')).json(); if(st&&st.counter&&st.counter.start_timestamp) since=st.counter.start_timestamp; }catch(e){}
-      if(info) info.textContent='SOC attuale: '+soc+'  ·  energia netta: '+net+'  ·  ultima taratura: '+since;
-    }catch(e){ if(info) info.textContent='stato non disponibile'; }
+(function () {
+  var $ = function (id) { return document.getElementById(id); };
+  var esc = function (s) { return String(s).replace(/[&<>"']/g, function (c) { return '&#' + c.charCodeAt(0) + ';'; }); };
+  var n = function (v, d, u) { return (v === null || v === undefined || !isFinite(Number(v))) ? '—' : Number(v).toFixed(d).replace('.', ',') + (u || ''); };
+  var kwh = function (w) { return n(w === null || w === undefined ? null : Number(w) / 1000, 1); };
+  var sign = function (v, d, u) { if (v === null || v === undefined) return '—'; return (Number(v) > 0 ? '+' : '') + n(v, d, u); };
+  var balBusy = false;
+
+  function render(d) {
+    $('soc').textContent = n(d.soc_pct, 1, ' %');
+    $('volt').textContent = n(d.battery_v, 1, ' V');
+    $('amp').textContent = sign(d.battery_a, 1, ' A');
+    $('capNote').textContent = 'Capacità impostata ' + n(d.nominal_ah, 0, ' Ah') + ' · energia contata ' + kwh(d.net_wh) + ' kWh · ultima ricalibrazione al pieno: ' + (d.last_full ? d.last_full.slice(8, 10) + '/' + d.last_full.slice(5, 7) + ' ' + d.last_full.slice(11, 16) : 'mai');
+
+    var b = d.balance || {};
+    $('b1').textContent = n(b.serie1_v, 2, ' V');
+    $('b2').textContent = n(b.serie2_v, 2, ' V');
+    $('med').textContent = sign(b.median_diff_v, 2, ' V');
+    $('onMin').textContent = n(b.day_on_min, 0, ' min');
+    var txt = b.enabled ? ('Bilanciatori: ' + (b.reason || '—')) : 'Bilanciatori disattivati';
+    if (b.charging_bank) txt = 'In carica il banco ' + b.charging_bank + ' · ' + txt;
+    if (b.cooldown_left_min > 0) txt += ' · pausa ancora ' + n(b.cooldown_left_min, 0, ' min');
+    if (b.median_at) txt += ' · misura a riposo delle ' + b.median_at;
+    $('balNote').textContent = txt + '. Il conteggio dei minuti riparte a ogni riavvio.';
+    if (!balBusy) $('balEnabled').checked = !!b.enabled;
+
+    $('chans').innerHTML = (d.channels || []).map(function (c) {
+      var tag = c.state === 'non_conduce' ? '<span class="tag bad">non conduce</span>'
+        : c.state === 'saturo' ? '<span class="tag sat">saturo</span>' : '<span class="tag ok">ok</span>';
+      var amps = c.current_a === null || c.current_a === undefined ? null : -Number(c.current_a);
+      var val = c.state === 'saturo' ? '≤ ' + n(amps, 1, ' A') : sign(amps, 1, ' A');
+      return '<tr><td>' + esc(c.name) + '</td><td>' + val + '</td><td>' + tag + '</td></tr>';
+    }).join('');
+
+    var m = d.measured || {};
+    var a = m.bk1 || [], z = m.bk2 || [];
+    var byNum = {};
+    function put(list, key) { list.forEach(function (x) { var k = String(x.name).charAt(0); (byNum[k] = byNum[k] || {})[key] = x; }); }
+    put(a, 'a'); put(z, 'b');
+    function cell(x) { if (!x) return '—'; var s = n(x.ah, 1); return x.name === m.weakest ? '<span class="weak">' + s + '</span>' : s; }
+    $('tests').innerHTML = Object.keys(byNum).sort().map(function (k) {
+      return '<tr><td>' + esc(k) + '</td><td>' + cell(byNum[k].a) + '</td><td>' + cell(byNum[k].b) + '</td></tr>';
+    }).join('') || '<tr><td colspan="3">Nessuna prova registrata</td></tr>';
+    $('testsFoot').innerHTML = a.length || z.length ? '<tr><td>Totale</td><td>' + n(m.total_bk1, 1) + '</td><td>' + n(m.total_bk2, 1) + '</td></tr>' : '';
+    $('testNote').textContent = m.pack_ah ? ('Limite del pacco: ' + n(m.pack_ah, 1, ' Ah') + ' (gruppo più piccolo). In evidenza la batteria più debole: ' + m.weakest + '.') : '';
+
+    $('daily').innerHTML = (d.daily || []).map(function (r) {
+      var p = String(r.day).split('-');
+      return '<tr><td>' + esc(p[2] + '/' + p[1]) + '</td><td>' + kwh(r.pv_Wh) + '</td><td>' + kwh(r.load_Wh) + '</td><td>' + kwh(r.grid_Wh) + '</td><td>' + kwh(r.batt_in_Wh) + '</td><td>' + kwh(r.batt_out_Wh) + '</td></tr>';
+    }).join('');
   }
-  async function post(url, msg){
-    if(!confirm(msg)) return;
-    setOut('invio…');
-    try{ var r=await fetch(url,{method:'POST'}); var j=await r.json(); setOut((j&&j.message)? j.message : JSON.stringify(j)); }
-    catch(e){ setOut('errore: '+e); }
-    setTimeout(refresh, 500);
+
+  function load() {
+    fetch('/api/battery-status', { cache: 'no-store' }).then(function (r) { return r.json(); }).then(render).catch(function () { /* offline */ });
   }
-  var bf=document.getElementById('btnBatteryFull'), br=document.getElementById('btnBatteryReset');
-  if(bf) bf.addEventListener('click', function(){ post('/api/battery/full', 'Segnare la batteria come CARICA (100%)? Tara il SOC al massimo.'); });
-  if(br) br.addEventListener('click', function(){ post('/api/battery/reset', 'Azzerare il contatore (batteria VUOTA, SOC 0%)? Tara il SOC al minimo.'); });
-  var ac=document.getElementById('autocalEnabled');
-  if(ac){
-    fetch('/api/battery/autocal').then(function(r){return r.json();}).then(function(j){ ac.checked = !!(j && j.enabled); }).catch(function(){});
-    ac.addEventListener('change', function(){
-      fetch('/api/battery/autocal', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({enabled: ac.checked})})
-        .then(function(r){return r.json();}).then(function(){ setOut(ac.checked ? '🤖 Auto-calibrazione attivata' : 'Auto-calibrazione disattivata'); }).catch(function(){ setOut('errore toggle auto-calibrazione'); });
+  load();
+  setInterval(load, 10000);
+  var rb = $('btnRefresh'); if (rb) rb.addEventListener('click', load);
+
+  // Comandi: taratura SOC
+  function setCal(t) { $('battCalOut').textContent = t; }
+  function calPost(url, msg) {
+    if (!confirm(msg)) return;
+    setCal('invio…');
+    fetch(url, { method: 'POST' }).then(function (r) { return r.json(); }).then(function (j) {
+      setCal((j && j.message) ? j.message : JSON.stringify(j));
+      setTimeout(load, 500);
+    }).catch(function (e) { setCal('errore: ' + e); });
+  }
+  $('btnBatteryFull').addEventListener('click', function () { calPost('/api/battery/full', 'Segnare la batteria come CARICA (100%)? Tara il SOC al massimo.'); });
+  $('btnBatteryReset').addEventListener('click', function () { calPost('/api/battery/reset', 'Azzerare il contatore (batteria VUOTA, SOC 0%)? Tara il SOC al minimo.'); });
+
+  var ac = $('autocalEnabled');
+  fetch('/api/battery/autocal').then(function (r) { return r.json(); }).then(function (j) { ac.checked = !!(j && j.enabled); }).catch(function () {});
+  ac.addEventListener('change', function () {
+    fetch('/api/battery/autocal', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled: ac.checked }) })
+      .then(function (r) { return r.json(); }).then(function () { setCal(ac.checked ? 'Auto-calibrazione attivata' : 'Auto-calibrazione disattivata'); })
+      .catch(function () { setCal('errore nel salvare l\'auto-calibrazione'); });
+  });
+
+  // Comandi: bilanciamento
+  var en = $('balEnabled');
+  en.addEventListener('change', function () {
+    if (en.checked && !confirm('Abilitare il bilanciamento automatico?')) { en.checked = false; return; }
+    balBusy = true;
+    $('balOut').textContent = 'invio…';
+    fetch('/api/balance', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled: en.checked }) })
+      .then(function (r) { return r.json(); }).then(function (j) { $('balOut').textContent = (j && j.ok) ? 'Salvato' : 'errore'; })
+      .catch(function (e) { $('balOut').textContent = 'errore: ' + e; })
+      .then(function () { balBusy = false; load(); });
+  });
+})();
+</script>
+<script>
+(function () {
+  if (!window.Chart) return;
+  var $ = function (id) { return document.getElementById(id); };
+  var C = { b1: '#3987e5', b2: '#d95926', diff: '#e5e7eb', grid: 'rgba(148,163,184,.12)', ink: '#94a3b8', hair: 'rgba(148,163,184,.55)' };
+  var CUR = ['#3987e5', '#d95926', '#199e70', '#c98500', '#d55181'];
+  var AXIS_W = 58, GAP_MIN = 6;
+  var comma = function (v, d) { return Number(v).toFixed(d).replace('.', ','); };
+  var hhmm = function (m) { return String(Math.floor(m / 60)).padStart(2, '0') + ':' + String(m % 60).padStart(2, '0'); };
+  var fixW = function (s) { s.width = AXIS_W; };
+  var thresholds = { start: 0.3, stop: 0.15 };
+
+  var crosshair = { id: 'crosshair', afterDatasetsDraw: function (c) {
+    if (c.$x === undefined || c.$x === null) return;
+    var x = c.scales.x.getPixelForValue(c.$x), a = c.chartArea, g = c.ctx;
+    g.save(); g.strokeStyle = C.hair; g.lineWidth = 1; g.beginPath(); g.moveTo(x, a.top); g.lineTo(x, a.bottom); g.stroke(); g.restore();
+  } };
+  var bands = { id: 'bands', beforeDatasetsDraw: function (c) {
+    var y = c.scales.y, a = c.chartArea, g = c.ctx;
+    var py = function (v) { return y.getPixelForValue(v); };
+    g.save();
+    g.beginPath(); g.rect(a.left, a.top, a.right - a.left, a.bottom - a.top); g.clip();
+    g.fillStyle = 'rgba(148,163,184,.10)';
+    g.fillRect(a.left, py(thresholds.stop), a.right - a.left, py(-thresholds.stop) - py(thresholds.stop));
+    g.strokeStyle = C.hair; g.lineWidth = 1;
+    [thresholds.start, -thresholds.start].forEach(function (v) { g.beginPath(); g.moveTo(a.left, py(v)); g.lineTo(a.right, py(v)); g.stroke(); });
+    g.restore();
+    g.save(); g.fillStyle = C.ink; g.font = '11px system-ui, sans-serif'; g.textAlign = 'right'; g.textBaseline = 'bottom';
+    var yTop = py(thresholds.start);
+    if (yTop > a.top + 12) g.fillText('soglia di intervento ±' + comma(thresholds.start, 2) + ' V', a.right - 6, yTop - 2);
+    g.textBaseline = 'top';
+    g.fillText('bilanciati entro ±' + comma(thresholds.stop, 2) + ' V', a.right - 6, py(-thresholds.stop) + 2);
+    g.restore();
+  } };
+
+  function xScale(showTicks) {
+    return { type: 'linear', min: 0, max: 1440, grid: { color: C.grid, drawTicks: false }, border: { display: false },
+      ticks: { display: showTicks, stepSize: 120, color: C.ink, maxRotation: 0, callback: function (v) { return hhmm(v); } } };
+  }
+  function yScale(fmt, extra) {
+    return Object.assign({ grid: { color: C.grid, drawTicks: false }, border: { display: false }, afterFit: fixW, ticks: { color: C.ink, maxTicksLimit: 6, callback: fmt } }, extra || {});
+  }
+  function line(label, color, width) {
+    return { label: label, data: [], borderColor: color, backgroundColor: color, borderWidth: width || 2, borderCapStyle: 'round', borderJoinStyle: 'round', pointRadius: 0, pointHoverRadius: 4, pointHoverBorderWidth: 2, pointHoverBorderColor: '#0b1220', pointStyle: 'line', tension: 0, spanGaps: false };
+  }
+  var tip = { backgroundColor: '#111827', borderColor: '#334155', borderWidth: 1, titleColor: '#e5e7eb', bodyColor: '#e5e7eb', padding: 10, usePointStyle: true, displayColors: true };
+  var base = { responsive: true, maintainAspectRatio: false, animation: false, parsing: false, normalized: true, layout: { padding: { right: 10 } } };
+
+  var banks = new Chart($('chartBanks'), {
+    type: 'line', plugins: [crosshair],
+    data: { datasets: [line('Banco 1', C.b1), line('Banco 2', C.b2)] },
+    options: Object.assign({}, base, { events: [],
+      interaction: { mode: 'index', intersect: false },
+      scales: { x: xScale(false), y: yScale(function (v) { return comma(v, 1) + ' V'; }, { grace: '6%' }) },
+      plugins: { legend: { display: false }, tooltip: Object.assign({}, tip, { filter: function (i) { return i.parsed.y !== null; }, callbacks: {
+        title: function (i) { return i.length ? hhmm(i[0].parsed.x) : ''; },
+        label: function (i) { return comma(i.parsed.y, 2) + ' V  ' + i.dataset.label; },
+        afterBody: function (i) { if (!i.length) return ''; var p = diff.data.datasets[0].data[i[0].dataIndex]; return (p && p.y !== null) ? 'Differenza ' + (p.y > 0 ? '+' : '') + comma(p.y, 2) + ' V' : ''; }
+      } }) } })
+  });
+  var diff = new Chart($('chartDiff'), {
+    type: 'line', plugins: [bands, crosshair],
+    data: { datasets: [line('Differenza', C.diff)] },
+    options: Object.assign({}, base, { events: [],
+      interaction: { mode: 'index', intersect: false },
+      scales: { x: xScale(true), y: yScale(function (v) { return (v > 0 ? '+' : '') + comma(v, 2); }, { suggestedMin: -0.5, suggestedMax: 0.5, title: { display: false } }) },
+      plugins: { legend: { display: false }, tooltip: { enabled: false } } })
+  });
+  var currents = new Chart($('chartCurrents'), {
+    type: 'line', plugins: [crosshair],
+    data: { datasets: ['BATT1', 'BATT2', 'BATT3', 'BATT4', 'BATT5'].map(function (n, i) { return line(n, CUR[i], 1.5); }) },
+    options: Object.assign({}, base, {
+      interaction: { mode: 'index', intersect: false },
+      onHover: function (e, a, c) { var v = (e.x !== undefined && e.x >= c.chartArea.left && e.x <= c.chartArea.right) ? c.scales.x.getValueForPixel(e.x) : null; c.$x = v; },
+      scales: { x: xScale(true), y: yScale(function (v) { return comma(v, 0) + ' A'; }) },
+      plugins: { legend: { display: false }, tooltip: Object.assign({}, tip, { filter: function (i) { return i.parsed.y !== null; }, itemSort: function (a, b) { return a.datasetIndex - b.datasetIndex; }, callbacks: {
+        title: function (i) { return i.length ? hhmm(i[0].parsed.x) : ''; },
+        label: function (i) { return comma(i.parsed.y, 1) + ' A  ' + i.dataset.label; }
+      } }) } })
+  });
+  $('curLegend').replaceChildren.apply($('curLegend'), currents.data.datasets.map(function (d) {
+    var el = document.createElement('div'); el.className = 'leg';
+    var k = document.createElement('span'); k.className = 'key'; k.style.background = d.borderColor;
+    el.appendChild(k); el.appendChild(document.createTextNode(d.label)); return el;
+  }));
+
+  // Cursore condiviso tra tensioni e differenza; un solo tooltip con tutti i valori
+  var group = [banks, diff];
+  function clear() {
+    group.forEach(function (c) { c.$x = null; c.setActiveElements([]); if (c.tooltip) c.tooltip.setActiveElements([], { x: 0, y: 0 }); c.update('none'); });
+  }
+  function move(src, ev) {
+    var pts = src.getElementsAtEventForMode(ev, 'index', { intersect: false }, false);
+    var r = src.canvas.getBoundingClientRect(), px = ev.clientX - r.left, a = src.chartArea;
+    if (!pts.length || px < a.left || px > a.right) { clear(); return; }
+    var idx = pts[0].index, x = diff.data.datasets[0].data[idx] && diff.data.datasets[0].data[idx].x;
+    if (x === undefined) { clear(); return; }
+    group.forEach(function (c) {
+      var act = c.data.datasets.map(function (d, i) { return { datasetIndex: i, index: idx }; }).filter(function (e) { var p = c.data.datasets[e.datasetIndex].data[e.index]; return p && p.y !== null; });
+      c.$x = x; c.setActiveElements(act);
+      if (c === banks) c.tooltip.setActiveElements(act, { x: c.scales.x.getPixelForValue(x), y: c.chartArea.top + 20 });
+      c.update('none');
     });
   }
-  refresh(); setInterval(refresh, 15000);
-})();
-
-// Bilanciamento banchi: stato + toggle + test relè
-(function(){
-  var info=document.getElementById('balInfo'), out=document.getElementById('balOut'), en=document.getElementById('balEnabled');
-  if(!info && !en) return;
-  function setOut(t){ if(out) out.textContent=t; }
-  function render(j){
-    if(!j){ if(info) info.textContent='stato non disponibile'; return; }
-    if(en) en.checked = !!j.enabled;
-    var bank = j.charging_bank===1 ? 'Banco 1 (SERIE1)' : (j.charging_bank===2 ? 'Banco 2 (SERIE2)' : 'nessuno');
-    var s1 = (j.serie1_v!=null)? Number(j.serie1_v).toFixed(2)+'V' : '—';
-    var s2 = (j.serie2_v!=null)? Number(j.serie2_v).toFixed(2)+'V' : '—';
-    var d  = (j.diff_v!=null)? Number(j.diff_v).toFixed(3)+'V' : '—';
-    var extra = (j.manual_test_sec_left>0)? '  ·  TEST '+j.manual_test_sec_left+'s' : '';
-    if(info) info.textContent='SERIE1='+s1+'   SERIE2='+s2+'   Δ='+d+'   ·   in carica: '+bank+extra+(j.available?'':'  (GPIO non disp.)');
-  }
-  function refresh(){ fetch('/api/balance').then(function(r){return r.json();}).then(render).catch(function(){ if(info) info.textContent='stato non disponibile'; }); }
-  function post(body, msg){ setOut(msg||'invio…'); fetch('/api/balance',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}).then(function(r){return r.json();}).then(function(j){ render(j); setOut(j&&j.ok?'OK':'errore'); }).catch(function(e){ setOut('errore: '+e); }); }
-  if(en) en.addEventListener('change', function(){
-    if(en.checked && !confirm('Abilitare il bilanciamento AUTOMATICO? Verifica che caricatore ISOLATO e cablaggio siano corretti.')){ en.checked=false; return; }
-    post({enabled: en.checked}, en.checked?'Abilitazione…':'Disabilitazione…');
+  group.forEach(function (c) {
+    c.canvas.addEventListener('pointermove', function (e) { move(c, e); });
+    c.canvas.addEventListener('pointerleave', clear);
   });
-  // (Test relè manuali Banco1/Banco2/Stop spostati nella scheda 🔧 Diagnostica)
-  refresh(); setInterval(refresh, 5000);
+  currents.canvas.addEventListener('pointerleave', function () { currents.$x = null; currents.draw(); });
+
+  function pts(t, v) {
+    var out = [];
+    t.forEach(function (m, i) {
+      if (i && m - t[i - 1] > GAP_MIN) out.push({ x: t[i - 1] + 2, y: null });
+      out.push({ x: m, y: v[i] });
+    });
+    return out;
+  }
+  function last(v) { for (var i = v.length - 1; i >= 0; i--) if (v[i] !== null) return v[i]; return null; }
+  function localDay(d) { return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
+  var dateEl = $('histDate'), today = new Date(), first = new Date();
+  first.setDate(today.getDate() - 13);
+  dateEl.value = localDay(today); dateEl.max = localDay(today); dateEl.min = localDay(first);
+
+  function draw(d) {
+    if (d.start_diff_v) thresholds.start = d.start_diff_v;
+    if (d.stop_diff_v) thresholds.stop = d.stop_diff_v;
+    banks.data.datasets[0].data = pts(d.t, d.banco1);
+    banks.data.datasets[1].data = pts(d.t, d.banco2);
+    diff.data.datasets[0].data = pts(d.t, d.diff);
+    currents.data.datasets.forEach(function (ds) { ds.data = pts(d.t, d.channels[ds.label] || []); });
+    var b1 = last(d.banco1), b2 = last(d.banco2), df = last(d.diff);
+    $('banksEmpty').hidden = b1 !== null;
+    $('lastB1').textContent = b1 === null ? '—' : comma(b1, 2) + ' V';
+    $('lastB2').textContent = b2 === null ? '—' : comma(b2, 2) + ' V';
+    $('lastDiff').textContent = df === null ? '—' : (df > 0 ? '+' : '') + comma(df, 2) + ' V';
+    var body = $('histTable'); body.textContent = '';
+    d.t.forEach(function (m, i) {
+      if (m % 60 || d.banco1[i] === null) return;
+      var tr = document.createElement('tr');
+      [hhmm(m), comma(d.banco1[i], 2), comma(d.banco2[i], 2), comma(d.diff[i], 2)].forEach(function (s) { var td = document.createElement('td'); td.textContent = s; tr.appendChild(td); });
+      body.appendChild(tr);
+    });
+    banks.update('none'); diff.update('none'); currents.update('none');
+  }
+  function loadHist() {
+    fetch('/api/battery-history?date=' + encodeURIComponent(dateEl.value), { cache: 'no-store' }).then(function (r) { return r.json(); }).then(function (d) { if (d && d.ok) draw(d); }).catch(function () { /* offline */ });
+  }
+  dateEl.addEventListener('change', loadHist);
+  $('histToday').addEventListener('click', function () { dateEl.value = localDay(new Date()); loadHist(); });
+  loadHist();
+  setInterval(function () { if (dateEl.value === localDay(new Date())) loadHist(); }, 120000);
 })();
 </script>
 {% endraw %}

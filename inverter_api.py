@@ -7,7 +7,7 @@ Qui restano: app Flask, hook after_request, poll_loop, route, main().
 Lo stato modbus/relè vive in hardware (hardware.LAST_ERR / hardware.LAST_OK / hardware.RELAY_STATE).
 """
 from pathlib import Path
-import os, json, time, sqlite3, contextlib, signal
+import os, json, time, sqlite3, contextlib, signal, threading
 from datetime import datetime, timedelta
 from threading import Thread, Event, Lock
 from typing import Dict, Any, Optional, Tuple, List
@@ -41,6 +41,7 @@ from hardware import (
     _gpio_setup_output, _gpio_write, _gpio_read, _gpio_cleanup, GPIO_BACKEND,
     balance_setup, balance_set, balance_manual, balance_step, balance_status,
 )
+import statistics
 from string_watch import StringWatch, CHANNELS as STRING_CHANNELS, CLIP_MV
 
 STRING_WATCH = StringWatch()   # batterie che smettono di condurre (BMS / scollegate)
@@ -374,16 +375,57 @@ def diagnostics_page():
     return render_template("diagnostics.html", relay_pin=int(_get("relay.gpio_pin", 17)))
 
 @app.route("/stato-batterie")
-def batteries_page():
-    return render_template("batteries.html")
-
 @app.route("/learning")
-def learning_page():
-    return redirect("/stato-batterie")   # vecchi segnalibri e PWA gia' installate
+def old_battery_pages():
+    return redirect("/battery")   # vecchi segnalibri e PWA gia' installate
+
+@app.route("/api/battery-history")
+def battery_history():
+    """Storico di un giorno per i grafici della scheda Batteria: mediana ogni 2 minuti di tensioni
+    dei banchi, differenza e correnti (positive in carica, come l'inverter). Una sola lettura del DB."""
+    day = request.args.get("date") or datetime.now().strftime("%Y-%m-%d")
+    try:
+        datetime.strptime(day, "%Y-%m-%d")
+    except ValueError:
+        return jsonify({"ok": False, "error": "data non valida"}), 400
+    buckets = {}
+    with db() as con:
+        rows = con.execute(
+            "SELECT timestamp, data FROM i2c_snapshots WHERE timestamp BETWEEN ? AND ? AND rowid % 3 = 0",
+            (day + " 00:00:00", day + " 23:59:59")).fetchall()
+    for ts, txt in rows:
+        try:
+            snap = json.loads(txt)
+            minute = int(ts[11:13]) * 60 + int(ts[14:16])
+        except Exception:
+            continue
+        chans = {}
+        for dev in ("adc_mod1", "adc_mod2"):
+            if isinstance(snap.get(dev), dict):
+                chans.update(snap[dev])
+        b = buckets.setdefault(minute - minute % 2, {"banco1": [], "banco2": [], "diff": [], **{c: [] for c in STRING_CHANNELS}})
+        s1, s2 = chans.get("SERIE1"), chans.get("SERIE2")
+        # senza Banco2 derivato (Modbus assente) la lettura grezza non e' attendibile
+        if isinstance(s1, dict) and isinstance(s2, dict) and s2.get("derived") and None not in (s1.get("value"), s2.get("value")):
+            b["banco1"].append(float(s1["value"]))
+            b["banco2"].append(float(s2["value"]))
+            b["diff"].append(float(s1["value"]) - float(s2["value"]))
+        for c in STRING_CHANNELS:
+            if isinstance(chans.get(c), dict) and chans[c].get("current_a") is not None:
+                b[c].append(-float(chans[c]["current_a"]))
+    keys = sorted(buckets)
+    def series(name, digits):
+        return [round(statistics.median(buckets[k][name]), digits) if buckets[k][name] else None for k in keys]
+    return jsonify({
+        "ok": True, "date": day, "t": keys,
+        "banco1": series("banco1", 3), "banco2": series("banco2", 3), "diff": series("diff", 3),
+        "channels": {c: series(c, 2) for c in STRING_CHANNELS},
+        "start_diff_v": float(_get("balance.start_diff_v", 0.3)), "stop_diff_v": float(_get("balance.stop_diff_v", 0.15)),
+    })
 
 @app.route("/api/battery-status")
 def battery_status_api():
-    """Dati della scheda Stato batterie: solo valori misurati."""
+    """Dati della scheda Batteria: solo valori misurati."""
     nominal_ah = float(_get("battery.nominal_ah", 500))
     cap_wh = nominal_ah * float(_get("battery.nominal_voltage", 51.2))
     with db() as con:
@@ -1561,7 +1603,11 @@ def main():
     
     try:
         print(f"[main] Setting up signal handlers...", flush=True)
-        def _stop_sig(*_a): _stop.set()
+        def _stop_sig(*_a):
+            # Esce subito senza atexit: il cleanup GPIO sgancerebbe il rele' ENEL durante il riavvio.
+            # Rele' e SSR restano come sono finche' il nuovo processo non li reimposta.
+            _stop.set()
+            threading.Timer(2.0, os._exit, args=(0,)).start()
         signal.signal(signal.SIGTERM, _stop_sig)
         signal.signal(signal.SIGINT,  _stop_sig)
         import atexit

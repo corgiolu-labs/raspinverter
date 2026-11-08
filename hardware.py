@@ -843,6 +843,8 @@ def balance_status(i2c=None):
         "pending_bank": _bal_pending_bank,
         "median_diff_v": round(_bal_last_median, 3) if _bal_last_median is not None else None,
         "median_at": _bal_last_median_at,
+        "session": _bal_session,
+        "pulse_left_s": round(max(0.0, _bal_phase_until - now), 0) if _bal_phase == "charging" else 0,
         "measures_in_window": len(_bal_measures),
         "session_on_min": round(_bal_session_on_s / 60.0, 1),
         "day_on_min": round(_bal_day_on_s / 60.0, 1),

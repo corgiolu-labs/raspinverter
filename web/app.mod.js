@@ -533,8 +533,10 @@ if ('serviceWorker' in navigator) {
   }
 
   // === API SAFE FETCH =======================================================
-  var lastOk=0, fails=0, OFFLINE=15000;
-  setInterval(function(){ if(Date.now()-lastOk>OFFLINE) setOnline(false); }, 3000);
+  var fails=0, MAX_FAILS=4;   // OFF LINE solo dopo piu' errori di fila: una richiesta persa non e' un guasto
+  document.addEventListener('visibilitychange', function(){
+    if (!document.hidden) { fails=0; tick().catch(function(){}); }   // al rientro controlla subito
+  });
   
   // Ottimizzazione fetch con retry e timeout
   function safe(path){
@@ -545,13 +547,14 @@ if ('serviceWorker' in navigator) {
       .then(function(r){
         clearTimeout(timeoutId);
         if(!r.ok) throw new Error(r.status+' '+r.statusText);
-        lastOk=Date.now(); fails=0; setOnline(true); showErr('');
+        fails=0; setOnline(true); showErr('');
         return r.json();
       })
       .catch(function(e){
         clearTimeout(timeoutId);
-        fails++; if(Date.now()-lastOk>OFFLINE || fails>=2) setOnline(false);
-        showErr('Errore API: '+(e.message||e)); throw e;
+        fails++;
+        if(fails>=MAX_FAILS){ setOnline(false); showErr('Errore API: '+(e.message||e)); }
+        throw e;
       });
   }
 
