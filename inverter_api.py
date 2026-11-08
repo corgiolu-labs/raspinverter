@@ -11,7 +11,7 @@ import os, json, time, sqlite3, contextlib, signal
 from datetime import datetime, timedelta
 from threading import Thread, Event, Lock
 from typing import Dict, Any, Optional, Tuple, List
-from flask import Flask, jsonify, send_from_directory, request, render_template
+from flask import Flask, jsonify, send_from_directory, request, render_template, redirect
 
 try:
     from flask_compress import Compress  # Optional response compression
@@ -41,7 +41,7 @@ from hardware import (
     _gpio_setup_output, _gpio_write, _gpio_read, _gpio_cleanup, GPIO_BACKEND,
     balance_setup, balance_set, balance_manual, balance_step, balance_status,
 )
-from string_watch import StringWatch
+from string_watch import StringWatch, CHANNELS as STRING_CHANNELS, CLIP_MV
 
 STRING_WATCH = StringWatch()   # batterie che smettono di condurre (BMS / scollegate)
 
@@ -373,56 +373,65 @@ def history_page():
 def diagnostics_page():
     return render_template("diagnostics.html", relay_pin=int(_get("relay.gpio_pin", 17)))
 
+@app.route("/stato-batterie")
+def batteries_page():
+    return render_template("batteries.html")
+
 @app.route("/learning")
 def learning_page():
-    return render_template("learning.html")
+    return redirect("/stato-batterie")   # vecchi segnalibri e PWA gia' installate
 
-@app.route("/api/learn")
-def api_learn():
-    """Stato dell'apprendimento adattivo (shadow). Letto da data/learned_params.json."""
-    p = DATA_DIR / "learned_params.json"
-    try:
-        return jsonify(json.loads(p.read_text(encoding="utf-8")))
-    except Exception:
-        return jsonify({"mode": "shadow", "updated_at": None,
-                        "note": "learner non ancora eseguito",
-                        "capacity": {}, "hall_bias": {}, "thresholds": {},
-                        "coulombic_efficiency": {}, "recommendations": []})
+@app.route("/api/battery-status")
+def battery_status_api():
+    """Dati della scheda Stato batterie: solo valori misurati."""
+    nominal_ah = float(_get("battery.nominal_ah", 500))
+    cap_wh = nominal_ah * float(_get("battery.nominal_voltage", 51.2))
+    with db() as con:
+        row = con.execute("SELECT total_batt_net_Wh FROM battery_counters ORDER BY id DESC LIMIT 1").fetchone()
+        full = con.execute("""
+            SELECT b.start_timestamp FROM battery_counters a
+            JOIN battery_counters b ON b.id = (SELECT MIN(id) FROM battery_counters WHERE id > a.id)
+            WHERE a.reset_reason LIKE '%full%' ORDER BY b.id DESC LIMIT 1
+        """).fetchone()
+        daily = [dict(r) for r in con.execute(
+            "SELECT day, pv_Wh, load_Wh, grid_Wh, batt_in_Wh, batt_out_Wh FROM archive ORDER BY day DESC LIMIT 14")]
+    net_wh = float(row[0]) if row and row[0] is not None else None
+    soc = round(max(0.0, min(100.0, 100.0 * net_wh / cap_wh)), 1) if (net_wh is not None and cap_wh > 0) else None
+
+    snap = LAST_I2C if isinstance(LAST_I2C, dict) else {}
+    chans = {}
+    for dev in ("adc_mod1", "adc_mod2"):
+        if isinstance(snap.get(dev), dict):
+            chans.update(snap[dev])
+    channels = []
+    for c in STRING_CHANNELS:
+        v = chans.get(c) if isinstance(chans.get(c), dict) else {}
+        raw = v.get("raw_mv")
+        saturated = raw is not None and float(raw) >= CLIP_MV.get(c, 1955)
+        state = "non_conduce" if STRING_WATCH.state[c]["alert"] else ("saturo" if saturated else "ok")
+        channels.append({"name": c, "current_a": v.get("current_a"), "state": state})
+
+    tests = [t for t in (_get("battery.measured_batteries", []) or []) if isinstance(t, dict)]
+    bk1 = [t for t in tests if str(t.get("name", "")).endswith("bk1")]
+    bk2 = [t for t in tests if str(t.get("name", "")).endswith("bk2")]
+    total1 = round(sum(float(t["ah"]) for t in bk1), 1) if bk1 else None
+    total2 = round(sum(float(t["ah"]) for t in bk2), 1) if bk2 else None
+    weakest = min(tests, key=lambda t: float(t["ah"]))["name"] if tests else None
+
+    live = _last if isinstance(_last, dict) else {}
+    return jsonify({
+        "ok": True, "soc_pct": soc, "net_wh": net_wh, "nominal_ah": nominal_ah,
+        "battery_v": live.get("battery_v"), "battery_a": live.get("battery_a"),
+        "last_full": full[0] if full else None,
+        "balance": balance_status(LAST_I2C), "channels": channels,
+        "measured": {"bk1": bk1, "bk2": bk2, "total_bk1": total1, "total_bk2": total2, "weakest": weakest,
+                     "pack_ah": min(total1, total2) if (total1 and total2) else None},
+        "daily": daily,
+    })
 
 
-# --- Apply (shadow -> reale): lettura learned con guardrail + toggle per-fase --
-_LEARNED_CACHE = {"mtime": None, "data": {}}
-
-def _learned_params():
-    """Legge data/learned_params.json (cache per mtime). {} se assente/illeggibile."""
-    p = DATA_DIR / "learned_params.json"
-    try:
-        m = p.stat().st_mtime
-        if _LEARNED_CACHE["mtime"] != m:
-            _LEARNED_CACHE["data"] = json.loads(p.read_text(encoding="utf-8"))
-            _LEARNED_CACHE["mtime"] = m
-    except Exception:
-        return {}
-    return _LEARNED_CACHE["data"]
-
-def applied_capacity_wh(default_wh):
-    """Capacita' per il SOC: usa quella APPRESA solo se apply.soc_calibration=on,
-    confidenza alta/media e nei bound [0.5..1.1]x nominale; altrimenti il default config."""
-    try:
-        if not _bool(_get("apply.soc_calibration", False)):
-            return default_wh
-        cap = (_learned_params().get("capacity") or {})
-        v = cap.get("value_ah")
-        if v is None or cap.get("confidence") in (None, "n/d", "bassa"):
-            return default_wh
-        nom = float(_get("battery.nominal_ah", 500))
-        if not (0.5 * nom <= float(v) <= 1.1 * nom):
-            return default_wh
-        return float(v) * float(_get("battery.nominal_voltage", 51.2))
-    except Exception:
-        return default_wh
-
-APPLY_PHASES = ("soc_calibration", "balance", "grid")
+# --- Toggle shadow -> reale della logica F4 sul rele' ENEL ---
+APPLY_PHASES = ("grid",)
 
 @app.route("/api/apply", methods=["GET", "POST"])
 def api_apply():
@@ -733,7 +742,7 @@ def inverter():
     try:
         method = str(_get("battery.soc.method", "voltage_based"))
         if method == "energy_balance":
-            cap_wh = applied_capacity_wh(float(_get("battery.nominal_ah", 500)) * float(_get("battery.nominal_voltage", 51.2)))
+            cap_wh = float(_get("battery.nominal_ah", 500)) * float(_get("battery.nominal_voltage", 51.2))
             if cap_wh > 0:
                 s["soc_pct"] = round(max(0.0, min(100.0, 100.0 * s["battery_net_wh"] / cap_wh)), 1)
         else:

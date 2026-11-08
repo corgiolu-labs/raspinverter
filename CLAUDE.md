@@ -33,7 +33,7 @@ sistema) chiede la password, e da sessione non locale polkit rifiuta comunque
 
 ## Servizi
 
-`inverter.service` (dashboard + poll), `inverter-learn.service` + `.timer`.
+`inverter.service` (dashboard + poll).
 Dopo un deploy il riavvio del servizio lo esegue l'utente.
 
 ## Struttura
@@ -42,7 +42,8 @@ Dopo un deploy il riavvio del servizio lo esegue l'utente.
 |---|---|
 | `inverter_api.py` | Flask porta 8000, ~30 endpoint, poll loop, init DB |
 | `database.py`, `config.py`, `hardware.py` | persistenza, configurazione, I/O fisico |
-| `daily_analyzer.py`, `learn.py` | analisi giornaliera e apprendimento |
+| `daily_analyzer.py` | analisi giornaliera |
+| `string_watch.py` | avviso batteria che non conduce |
 | `web/` | PWA con Chart.js **vendorizzato** — niente CDN, deve funzionare offline |
 | `config/inverter_config.json` | taratura **dell'impianto reale**, in `.gitignore`: usare `inverter_config.example.json` come modello |
 | `old/` | materiale pre-riscrittura, vedi sotto |

@@ -24,6 +24,7 @@
       "charge_efficiency": 0.99
     },
     "net_reset_voltage": 46.0,
+    "measured_batteries": [],
     "autocal": {
       "enabled": true,
       "full_voltage": 57.0,
@@ -92,8 +93,6 @@
     "need_windows": 3
   },
   "apply": {
-    "soc_calibration": false,
-    "balance": false,
     "grid": false
   },
   "i2c": {

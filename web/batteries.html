@@ -1,0 +1,135 @@
+{% extends "_base.html" %}
+{% block title %}Stato batterie · Inverter{% endblock %}
+{% block brand %}🔋 Stato batterie{% endblock %}
+{% block banner %}{% endblock %}
+{% block head_extra %}
+{% raw %}
+<style>
+  .bs-grid { display:grid; gap:12px; grid-template-columns:repeat(auto-fit,minmax(280px,1fr)); }
+  .bs-grid .wide { grid-column:1 / -1; }
+  .kpi-row { display:flex; flex-wrap:wrap; gap:18px; }
+  .kpi { font-size:1.5rem; font-weight:700; font-variant-numeric:tabular-nums; }
+  .kpi-label { font-size:.78rem; color:var(--muted); }
+  .note { color:var(--muted); font-size:.82rem; margin-top:8px; }
+  .bs-table { width:100%; border-collapse:collapse; font-size:.9rem; font-variant-numeric:tabular-nums; }
+  .bs-table th { text-align:right; color:var(--muted); font-weight:500; padding:4px 6px; border-bottom:1px solid rgba(255,255,255,.12); }
+  .bs-table td { text-align:right; padding:4px 6px; border-bottom:1px solid rgba(255,255,255,.05); color:var(--text) !important; font-family:inherit !important; font-weight:400; }
+  .bs-table th:first-child, .bs-table td:first-child { text-align:left; }
+  .bs-table tfoot td { font-weight:700; border-top:1px solid rgba(255,255,255,.2); }
+  .scroll-x { overflow-x:auto; }
+  .tag { display:inline-block; padding:1px 8px; border-radius:999px; font-size:.74rem; }
+  .tag.ok { background:rgba(34,197,94,.18); color:#4ade80; }
+  .tag.sat { background:rgba(148,163,184,.2); color:#cbd5e1; }
+  .tag.bad { background:rgba(245,158,11,.2); color:#f59e0b; }
+  .weak { color:#f59e0b !important; font-weight:700; }
+</style>
+{% endraw %}
+{% endblock %}
+{% block footer %}Dati misurati: inverter via Modbus, sensori Hall, prove al tester{% endblock %}
+{% block content %}
+<section class="bs-grid">
+  <div class="card">
+    <h3>🔋 Pacco</h3>
+    <div class="kpi-row">
+      <div><div class="kpi" id="soc">—</div><div class="kpi-label">SOC</div></div>
+      <div><div class="kpi" id="volt">—</div><div class="kpi-label">Tensione</div></div>
+      <div><div class="kpi" id="amp">—</div><div class="kpi-label">Corrente inverter</div></div>
+    </div>
+    <div class="note" id="capNote"></div>
+  </div>
+
+  <div class="card">
+    <h3>⚖️ Banchi e bilanciatori</h3>
+    <div class="kpi-row">
+      <div><div class="kpi" id="b1">—</div><div class="kpi-label">Banco 1</div></div>
+      <div><div class="kpi" id="b2">—</div><div class="kpi-label">Banco 2</div></div>
+      <div><div class="kpi" id="med">—</div><div class="kpi-label">Differenza a riposo</div></div>
+      <div><div class="kpi" id="onMin">—</div><div class="kpi-label">Caricatori accesi oggi</div></div>
+    </div>
+    <div class="note" id="balNote"></div>
+  </div>
+
+  <div class="card">
+    <h3>🧲 Correnti per batteria</h3>
+    <table class="bs-table"><thead><tr><th>Canale</th><th>Corrente</th><th>Stato</th></tr></thead><tbody id="chans"></tbody></table>
+    <div class="note">Positivo in carica, negativo in scarica. "Saturo": il sensore è a fondo scala e la scarica reale è più alta. Per il SOC si usa la corrente dell'inverter.</div>
+  </div>
+
+  <div class="card">
+    <h3>🔬 Capacità misurate al tester</h3>
+    <table class="bs-table"><thead><tr><th>N.</th><th>Gruppo bk1 (Ah)</th><th>Gruppo bk2 (Ah)</th></tr></thead><tbody id="tests"></tbody><tfoot id="testsFoot"></tfoot></table>
+    <div class="note" id="testNote"></div>
+  </div>
+
+  <div class="card wide">
+    <h3>📅 Energia degli ultimi 14 giorni (kWh)</h3>
+    <div class="scroll-x">
+      <table class="bs-table"><thead><tr><th>Giorno</th><th>Solare</th><th>Casa</th><th>Rete</th><th>In batteria</th><th>Da batteria</th></tr></thead><tbody id="daily"></tbody></table>
+    </div>
+  </div>
+</section>
+{% endblock %}
+{% block scripts %}
+{% raw %}
+<script>
+(function () {
+  var $ = function (id) { return document.getElementById(id); };
+  var esc = function (s) { return String(s).replace(/[&<>"']/g, function (c) { return '&#' + c.charCodeAt(0) + ';'; }); };
+  var n = function (v, d, u) { return (v === null || v === undefined || !isFinite(Number(v))) ? '—' : Number(v).toFixed(d).replace('.', ',') + (u || ''); };
+  var kwh = function (w) { return n(w === null || w === undefined ? null : Number(w) / 1000, 1); };
+  var sign = function (v, d, u) { if (v === null || v === undefined) return '—'; return (Number(v) > 0 ? '+' : '') + n(v, d, u); };
+
+  function render(d) {
+    $('soc').textContent = n(d.soc_pct, 1, ' %');
+    $('volt').textContent = n(d.battery_v, 1, ' V');
+    $('amp').textContent = sign(d.battery_a, 1, ' A');
+    $('capNote').textContent = 'Capacità impostata ' + n(d.nominal_ah, 0, ' Ah') + ' · energia contata ' + kwh(d.net_wh) + ' kWh · ultima ricalibrazione al pieno: ' + (d.last_full ? d.last_full.slice(8, 10) + '/' + d.last_full.slice(5, 7) + ' ' + d.last_full.slice(11, 16) : 'mai');
+
+    var b = d.balance || {};
+    $('b1').textContent = n(b.serie1_v, 2, ' V');
+    $('b2').textContent = n(b.serie2_v, 2, ' V');
+    $('med').textContent = sign(b.median_diff_v, 2, ' V');
+    $('onMin').textContent = n(b.day_on_min, 0, ' min');
+    var txt = b.enabled ? ('Bilanciatori: ' + (b.reason || '—')) : 'Bilanciatori disattivati';
+    if (b.charging_bank) txt = 'In carica il banco ' + b.charging_bank + ' · ' + txt;
+    if (b.cooldown_left_min > 0) txt += ' · pausa ancora ' + n(b.cooldown_left_min, 0, ' min');
+    if (b.median_at) txt += ' · misura a riposo delle ' + b.median_at;
+    $('balNote').textContent = txt + '. Il conteggio dei minuti riparte a ogni riavvio.';
+
+    $('chans').innerHTML = (d.channels || []).map(function (c) {
+      var tag = c.state === 'non_conduce' ? '<span class="tag bad">non conduce</span>'
+        : c.state === 'saturo' ? '<span class="tag sat">saturo</span>' : '<span class="tag ok">ok</span>';
+      var amps = c.current_a === null || c.current_a === undefined ? null : -Number(c.current_a);
+      var val = c.state === 'saturo' ? '≤ ' + n(amps, 1, ' A') : sign(amps, 1, ' A');
+      return '<tr><td>' + esc(c.name) + '</td><td>' + val + '</td><td>' + tag + '</td></tr>';
+    }).join('');
+
+    var m = d.measured || {};
+    var a = m.bk1 || [], z = m.bk2 || [];
+    var byNum = {};
+    function put(list, key) { list.forEach(function (x) { var k = String(x.name).charAt(0); (byNum[k] = byNum[k] || {})[key] = x; }); }
+    put(a, 'a'); put(z, 'b');
+    function cell(x) { if (!x) return '—'; var s = n(x.ah, 1); return x.name === m.weakest ? '<span class="weak">' + s + '</span>' : s; }
+    $('tests').innerHTML = Object.keys(byNum).sort().map(function (k) {
+      return '<tr><td>' + esc(k) + '</td><td>' + cell(byNum[k].a) + '</td><td>' + cell(byNum[k].b) + '</td></tr>';
+    }).join('') || '<tr><td colspan="3">Nessuna prova registrata</td></tr>';
+    $('testsFoot').innerHTML = a.length || z.length ? '<tr><td>Totale</td><td>' + n(m.total_bk1, 1) + '</td><td>' + n(m.total_bk2, 1) + '</td></tr>' : '';
+    $('testNote').textContent = m.pack_ah ? ('Limite del pacco: ' + n(m.pack_ah, 1, ' Ah') + ' (gruppo più piccolo). In evidenza la batteria più debole: ' + m.weakest + '.') : '';
+
+    $('daily').innerHTML = (d.daily || []).map(function (r) {
+      var p = String(r.day).split('-');
+      return '<tr><td>' + esc(p[2] + '/' + p[1]) + '</td><td>' + kwh(r.pv_Wh) + '</td><td>' + kwh(r.load_Wh) + '</td><td>' + kwh(r.grid_Wh) + '</td><td>' + kwh(r.batt_in_Wh) + '</td><td>' + kwh(r.batt_out_Wh) + '</td></tr>';
+    }).join('');
+  }
+
+  function load() {
+    fetch('/api/battery-status', { cache: 'no-store' }).then(function (r) { return r.json(); }).then(render).catch(function () { /* offline */ });
+  }
+  load();
+  setInterval(load, 10000);
+  var rb = $('btnRefresh'); if (rb) rb.addEventListener('click', load);
+})();
+</script>
+{% endraw %}
+<script src="/status.mod.js?v=20260606"></script>
+{% endblock %}

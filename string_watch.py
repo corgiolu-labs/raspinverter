@@ -18,6 +18,8 @@ from typing import Any, Dict, Optional
 CHANNELS = ("BATT1", "BATT2", "BATT3", "BATT4", "BATT5")
 # Uscita oltre la quale il Hall e' saturo in scarica (misurato nov 2026: BATT1/5 ~1330 mV, gli altri ~1975).
 SATURATION_MV = {"BATT1": 1300, "BATT2": 1900, "BATT3": 1900, "BATT4": 1900, "BATT5": 1300}
+# Soglia per mostrare "saturo" in dashboard: vicino al tetto reale, non prudente come quella sopra.
+CLIP_MV = {"BATT1": 1315, "BATT2": 1955, "BATT3": 1955, "BATT4": 1955, "BATT5": 1315}
 
 
 class StringWatch:

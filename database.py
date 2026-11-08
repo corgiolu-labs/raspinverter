@@ -103,8 +103,8 @@ def _db_files_size_bytes() -> int:
 
 
 # Ritenzione degli snapshot I2C grezzi. Servono solo al grafico del bilanciamento
-# del giorno e a learn.estimate_balance(), che guarda indietro 7 giorni: 14 e' doppio
-# margine. Senza potatura la tabella cresce ~0,5 GB/mese (una riga JSON ogni 5 s) ed
+# del giorno e alle analisi sui sensori; 14 giorni bastano e lasciano un margine.
+# Senza potatura la tabella cresce ~0,5 GB/mese (una riga JSON ogni 5 s) ed
 # e' quella che aveva portato il database a 2,78 GB nel novembre 2026.
 I2C_RETENTION_DAYS = 14
 

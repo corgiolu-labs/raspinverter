@@ -582,6 +582,7 @@ _bal_measures: list = []        # (monotonic, diff) validi: caricatori spenti e 
 _bal_pending_bank: int = 0      # banco da caricare secondo l'ultima misura valida (0 = nessuno)
 _bal_pending_at: float = 0.0    # monotonic dell'ultima misura che ha confermato il banco
 _bal_last_median: Optional[float] = None   # ultima mediana diff (S1-S2) su finestra piena
+_bal_last_median_at: Optional[str] = None   # ora dell'ultima mediana valida
 _bal_pulse_started: float = 0.0
 _bal_session_on_s: float = 0.0  # secondi di caricatore acceso nella sessione corrente
 _bal_day: str = ""
@@ -687,7 +688,7 @@ def balance_step(i2c, ctx=None):
     ctx = dati Modbus del ciclo (battery_a, pv_w, load_w); None se l'inverter non risponde."""
     global BALANCE_STATE, _bal_phase, _bal_phase_until, _bal_session, _bal_measures, _bal_pending_bank
     global _bal_pending_at, _bal_last_median, _bal_pulse_started, _bal_session_on_s, _bal_day
-    global _bal_day_on_s, _bal_reason
+    global _bal_day_on_s, _bal_reason, _bal_last_median_at
     cfg = CONF.get("balance", {})
     now = time.monotonic()
     # Override manuale (test cablaggio): tiene il banco scelto per N secondi
@@ -764,6 +765,7 @@ def balance_step(i2c, ctx=None):
     # DECISIONE (solo su finestra piena)
     if median is not None:
         _bal_last_median = median
+        _bal_last_median_at = time.strftime("%d/%m %H:%M")
         lower = 1 if median < 0 else 2
         if _bal_session:
             if abs(median) <= stop_diff:
@@ -840,6 +842,7 @@ def balance_status(i2c=None):
         "reason": _bal_reason,
         "pending_bank": _bal_pending_bank,
         "median_diff_v": round(_bal_last_median, 3) if _bal_last_median is not None else None,
+        "median_at": _bal_last_median_at,
         "measures_in_window": len(_bal_measures),
         "session_on_min": round(_bal_session_on_s / 60.0, 1),
         "day_on_min": round(_bal_day_on_s / 60.0, 1),
