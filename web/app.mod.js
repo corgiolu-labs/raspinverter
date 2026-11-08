@@ -462,7 +462,7 @@ if ('serviceWorker' in navigator) {
     }, 100);
   }
   
-  function _loadEnergyHistogram(){
+  function _loadEnergyHistogram(attempt){
     var granEl = getElement('histGran');
     if (!granEl || !histChart) return;   // solo nella pagina Storico: evita "Cannot read .value of null" altrove
     var gran = granEl.value;
@@ -504,7 +504,12 @@ if ('serviceWorker' in navigator) {
       histChart.getDatasetMeta(3).hidden = !getElement('chkLoad').checked;
 
       histChart.update('none');
-    }).catch(function(e){ showErr('Energy histogram: '+e); });
+    }).catch(function(e){
+      // All'apertura la connessione puo' non essere ancora pronta: riprova prima di segnalare
+      var n = attempt || 0;
+      if (n < 2) { setTimeout(function(){ _loadEnergyHistogram(n + 1); }, 3000); return; }
+      showErr('Energy histogram: '+e);
+    });
   }
   
   (function bindHistogramControls(){

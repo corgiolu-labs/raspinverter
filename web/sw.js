@@ -1,5 +1,5 @@
 /* Service Worker - Inverter Dashboard - OTTIMIZZATO */
-const VERSION = '1.4.8';                              // incrementa per forzare update
+const VERSION = '1.4.9';                              // incrementa per forzare update
 const ASSETS_VERSION = '20260606';                    // bust cache per CSS/JS
 const APP_CACHE     = `app-shell-${VERSION}`;
 const RUNTIME_CACHE = `runtime-${VERSION}`;
