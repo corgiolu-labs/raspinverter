@@ -98,8 +98,7 @@ CATALOG: List[Dict[str, Any]] = [
     _r(325, "float_v", "soglie", "Tensione di mantenimento", "Tensione a cui tiene la batteria quando è carica.", "V", 0.1, decimals=1),
     _r(327, "back_to_grid_v", "soglie", "Passa alla rete sotto", "Con la rete disponibile, sotto questa tensione l'inverter smette di usare la batteria e prende la casa dalla rete.", "V", 0.1, decimals=1),
     _r(326, "back_to_batt_v", "soglie", "Torna alla batteria sopra", "Dopo essere passato alla rete, torna a usare la batteria quando la tensione risale sopra questo valore.", "V", 0.1, decimals=1),
-    _r(329, "low_cutoff_v", "soglie", "Spegnimento per batteria scarica", "Senza rete, sotto questa tensione l'inverter si spegne per non scaricare troppo la batteria.", "V", 0.1, decimals=1,
-       nota="È sotto lo stacco dei BMS delle batterie (22,2 V per modulo, 44,4 V per il pacco): senza rete il BMS staccherebbe prima dell'inverter."),
+    _r(329, "low_cutoff_v", "soglie", "Spegnimento per batteria scarica", "Senza rete, sotto questa tensione l'inverter si spegne per non scaricare troppo la batteria.", "V", 0.1, decimals=1),
     # --- carica
     _r(331, "charge_priority", "carica", "Da dove carica la batteria", "Fonte preferita per caricare la batteria.", enum=CHARGE_PRIORITY),
     _r(332, "max_charge_a", "carica", "Corrente massima di carica", "Limite complessivo, solare più rete.", "A", 0.1, decimals=1),
@@ -190,12 +189,54 @@ def describe(raw: Dict[int, int]) -> Dict[str, Any]:
     if all(raw.get(a) is not None for a in range(434, 440)) and 2000 < raw[434] < 2100:
         y, mo, d, h, mi, s = (raw[a] for a in range(434, 440))
         items.append({"addr": 434, "key": "clock", "group": "id", "label": "Orologio interno", "fonte": "dedotto",
-                      "desc": "Registri 434-439 letti come anno, mese, giorno, ore, minuti, secondi: è un'interpretazione, non documentata.",
-                      "nota": "Se la data è molto indietro, l'orologio dell'inverter non è mai stato regolato." if y < 2025 else None,
+                      "desc": "Registri 434-439: anno, mese, giorno, ore, minuti, secondi. Non documentati, ma verificati il 20/11/2026: i secondi avanzano in tempo reale. Si regola dalla pagina Imposta inverter.",
+                      "nota": "La data è molto indietro: regola l'orologio dalla pagina Imposta inverter." if y < 2025 else None,
                       "raw": None, "value": None, "text": "%02d/%02d/%04d %02d:%02d:%02d" % (d, mo, y, h, mi, s)})
+
+    notes = dynamic_notes(raw)
+    for it in items:
+        if it["addr"] in notes and it.get("key") != "clock":
+            it["nota"] = notes[it["addr"]]
 
     unknown = [{"addr": a, "raw": v, "signed": _signed(v)} for a, v in sorted(raw.items()) if v and a not in DOCUMENTED]
     return {"items": items, "unknown": unknown, "groups": [{"key": k, "label": l} for k, l in GROUPS]}
+
+
+def dynamic_notes(raw: dict) -> dict:
+    """Note calcolate sui valori attuali, cosi' la pagina Registri resta vera dopo ogni modifica."""
+    v = lambda a: raw[a] / 10.0
+    it = lambda x, d=1: ("%.*f" % (d, x)).replace(".", ",")
+    n = {}
+    if raw.get(329) is not None:
+        n[329] = ("Sotto lo stacco dei BMS (%s V): senza rete i BMS staccherebbero la batteria prima dell'inverter." % it(BMS_CUTOFF_V)
+                  if v(329) < BMS_CUTOFF_V + 0.1 else
+                  "Sopra lo stacco dei BMS (%s V): senza rete si spegne prima l'inverter, in modo pulito." % it(BMS_CUTOFF_V))
+    if raw.get(324) is not None:
+        c = v(324) / 16
+        n[324] = "%s V per cella (16 celle)%s." % (it(c, 3), ": oltre 3,65 V le celle si sovraccaricano" if c > 3.65 else "")
+    if raw.get(325) is not None:
+        c = v(325) / 16
+        n[325] = "%s V per cella. Resta sopra i 57,0 V con cui il Raspberry riconosce la carica completa." % it(c, 3) if v(325) >= 57.0 else \
+                 "%s V per cella." % it(c, 3)
+    if raw.get(327) is not None and raw.get(326) is not None:
+        n[327] = n[326] = "Coincide con le soglie del relè ENEL del Raspberry (48/51 V): vanno cambiate insieme." \
+            if (raw[327], raw[326]) == (480, 510) else "Diversa dalle soglie del relè ENEL del Raspberry (48/51 V): controllare."
+    if raw.get(331) == 0:
+        n[331] = "Priorità alla rete: per un impianto off-grid conviene la priorità al solare."
+    for a in (329, 327, 326, 325, 324, 332, 333, 331, 301, 303, 305, 306):
+        if raw.get(a) is not None:
+            n[a] = ((n.get(a) or "") + " Modificabile dalla pagina Imposta inverter.").strip()
+    return n
+
+
+CLOCK_ADDR = 434   # 434-439: anno, mese, giorno, ore, minuti, secondi
+
+
+def clock_from_raw(raw: dict):
+    vals = [raw.get(a) for a in range(CLOCK_ADDR, CLOCK_ADDR + 6)]
+    if None in vals or not 2000 < vals[0] < 2100:
+        return None
+    return vals
 
 
 # ---------------------------------------------------------------------------
@@ -235,7 +276,7 @@ WRITABLE = [
          enum={0: "No", 1: "Dopo 1 minuto"}, desc="Se il display torna da solo alla schermata iniziale."),
 ]
 WRITABLE_BY_ADDR = {w["addr"]: w for w in WRITABLE}
-SETTINGS_BLOCKS = ((300, 40),)   # 300-339: tutte le impostazioni scrivibili e i loro vincoli
+SETTINGS_BLOCKS = ((300, 40), (434, 6))   # 300-339 impostazioni e vincoli, 434-439 orologio
 
 
 def to_raw(spec, value) -> int:

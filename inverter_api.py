@@ -146,6 +146,11 @@ def poll_loop():
                     relay_force_step()
                 except Exception as _fe:
                     print(f"[relay] force step error: {_fe}", flush=True)
+                # Fail-safe ENEL: gira ogni ciclo, anche (soprattutto) quando l'inverter non risponde
+                try:
+                    hardware.relay_failsafe_step()
+                except Exception as _fse:
+                    print(f"[relay] fail-safe error: {_fse}", flush=True)
 
                 if regs:
                     s = {"timestamp": ts_now, **regs}
@@ -428,8 +433,12 @@ def inverter_settings_api():
                 item["options"] = [{"value": k, "label": l} for k, l in w["enum"].items()]
             item.update({"raw": cur, "value": None if cur is None else inverter_registers.from_raw(w, cur)})
             items.append(item)
+        clk = inverter_registers.clock_from_raw(raw)
         return jsonify({"ok": True, "armed_left_s": round(_write_armed_left()), "items": items,
-                        "warnings": inverter_registers.cross_check(raw), "log": _write_log_tail()})
+                        "warnings": inverter_registers.cross_check(raw), "log": _write_log_tail(),
+                        "clock": None if clk is None else "%02d/%02d/%04d %02d:%02d:%02d" % (clk[2], clk[1], clk[0], clk[3], clk[4], clk[5]),
+                        "clock_drift_s": None if clk is None else _clock_drift_s(clk),
+                        "pi_clock": datetime.now().strftime("%d/%m/%Y %H:%M:%S"), "pi_synced": _pi_time_synced()})
 
     body = request.get_json(silent=True) or {}
     if not _write_armed_left():
@@ -478,6 +487,55 @@ def inverter_settings_api():
     if not success:
         return jsonify({"ok": False, "error": msg if not ok else "scritto ma la rilettura dà %s" % readback}), 502
     return jsonify({"ok": True, "old": inverter_registers.from_raw(spec, old_raw), "new": inverter_registers.from_raw(spec, new_raw)})
+
+def _clock_drift_s(clk):
+    try:
+        return round((datetime(*clk) - datetime.now()).total_seconds())
+    except Exception:
+        return None
+
+def _pi_time_synced() -> bool:
+    """True se l'orologio del Raspberry e' sincronizzato via NTP (timedatectl)."""
+    try:
+        import subprocess
+        out = subprocess.run(["timedatectl", "show", "-p", "NTPSynchronized", "--value"],
+                             capture_output=True, text=True, timeout=3).stdout.strip()
+        return out == "yes"
+    except Exception:
+        return False
+
+@app.route("/api/inverter-clock", methods=["POST"])
+def inverter_clock_set():
+    """Porta l'orologio dell'inverter (434-439) all'ora del Raspberry. Solo con scrittura abilitata
+    e Raspberry sincronizzato via NTP; rilegge e accetta uno scarto di pochi secondi."""
+    if not _write_armed_left():
+        return jsonify({"ok": False, "error": "scrittura non abilitata: abilitala dalla pagina"}), 403
+    if not _pi_time_synced():
+        return jsonify({"ok": False, "error": "l'orologio del Raspberry non è sincronizzato: non lo copio sull'inverter"}), 409
+    who = request.headers.get("X-Forwarded-For") or request.remote_addr
+    with _lock:
+        before = inverter_registers.clock_from_raw(read_holding_blocks(((434, 6),)) or {})
+        if before is None:
+            return jsonify({"ok": False, "error": "impossibile leggere l'orologio dell'inverter"}), 503
+        now = datetime.now()
+        ok, msg = write_holding_fc16(434, [now.year, now.month, now.day, now.hour, now.minute, now.second])
+        time.sleep(0.4)
+        after = inverter_registers.clock_from_raw(read_holding_blocks(((434, 6),)) or {})
+    drift = None if after is None else _clock_drift_s(after)
+    success = ok and drift is not None and abs(drift) <= 5
+    fmt = lambda c: "—" if c is None else "%02d/%02d/%04d %02d:%02d:%02d" % (c[2], c[1], c[0], c[3], c[4], c[5])
+    line = "%s  Orologio (434-439): %s -> %s  %s  rilettura=%s  da %s" % (
+        now_str(), fmt(before), now.strftime("%d/%m/%Y %H:%M:%S"), "OK" if success else "FALLITA: " + msg, fmt(after), who)
+    print("[inverter-write] " + line, flush=True)
+    try:
+        with open(WRITE_LOG, "a", encoding="utf-8") as f:
+            f.write(line + "\n")
+    except Exception:
+        pass
+    _REG_CACHE["data"] = None
+    if not success:
+        return jsonify({"ok": False, "error": msg if not ok else "scritto ma la rilettura dà %s" % fmt(after)}), 502
+    return jsonify({"ok": True, "clock": fmt(after), "drift_s": drift})
 
 @app.route("/api/inverter-settings/arm", methods=["POST"])
 def inverter_settings_arm():

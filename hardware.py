@@ -14,8 +14,10 @@ from typing import Dict, Any, Optional, Tuple, List
 from config import (
     I2C_ENABLED, I2C_BUS, I2C_DEVICES,
     MB_PORT, MB_BAUD, MB_PARITY, MB_STOP, MB_BYTES, MB_TIMEOUT, UNIT_ID,
-    REGS, SIGNED, CONF, now_str,
+    REGS, SIGNED, CONF, now_str, DATA_DIR,
 )
+import json
+import os
 
 # ---------------------------------------------------------------------------
 # Optional I2C (SMBus) support
@@ -296,8 +298,8 @@ def read_regs() -> Optional[Dict[str, Any]]:
     return None
 
 
-def write_holding_fc16(addr: int, raw: int) -> Tuple[bool, str]:
-    """Scrive UN registro holding con FC16 (l'inverter ignora FC06). Chi la chiama tiene il lock
+def write_holding_fc16(addr: int, raw) -> Tuple[bool, str]:
+    """Scrive uno o piu' registri holding consecutivi (raw intero o lista) con FC16 (l'inverter ignora FC06). Chi la chiama tiene il lock
     del poll e ha gia' validato indirizzo e valore. Ritorna (ok, messaggio)."""
     if ModbusSerialClient is None:
         return False, "libreria Modbus non disponibile"
@@ -312,9 +314,11 @@ def write_holding_fc16(addr: int, raw: int) -> Tuple[bool, str]:
         if not cli.connect():
             return False, "connessione seriale fallita"
         if _PYMB_V3:
-            rr = cli.write_registers(int(addr), [int(raw)], **{_UNIT_KW: UNIT_ID})
+            vals = [int(x) for x in raw] if isinstance(raw, (list, tuple)) else [int(raw)]
+            rr = cli.write_registers(int(addr), vals, **{_UNIT_KW: UNIT_ID})
         else:
-            rr = cli.write_registers(int(addr), [int(raw)], unit=UNIT_ID)
+            vals = [int(x) for x in raw] if isinstance(raw, (list, tuple)) else [int(raw)]
+            rr = cli.write_registers(int(addr), vals, unit=UNIT_ID)
         if hasattr(rr, "isError") and rr.isError():
             return False, "l'inverter ha rifiutato il valore (%s)" % rr
         return True, "ok"
@@ -568,6 +572,29 @@ def _gpio_cleanup():
 # ---------------------------------------------------------------------------
 RELAY_STATE: Optional[bool] = None  # None=unknown, True=on, False=off
 RELAY_LAST_TOGGLE: float = 0.0
+# Fail-safe ENEL: istante dell'ultima tensione batteria valida letta dall'inverter. Parte "adesso"
+# cosi' all'avvio c'e' il tempo di grazia prima che la mancanza di dati agganci la rete.
+RELAY_LAST_VALID_T: float = time.monotonic()
+RELAY_STATE_FILE = DATA_DIR / "relay_state.json"   # ultimo stato, per ripartire uguale dopo un riavvio
+
+
+def _relay_state_save(on: bool):
+    try:
+        tmp = str(RELAY_STATE_FILE) + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump({"on": bool(on), "ts": now_str()}, f)
+        os.replace(tmp, str(RELAY_STATE_FILE))
+    except Exception as e:
+        print(f"[relay] stato non salvato: {e}", flush=True)
+
+
+def _relay_state_load() -> bool:
+    """Ultimo stato salvato; se manca o non si legge -> ON (lato sicuro: rete disponibile)."""
+    try:
+        with open(RELAY_STATE_FILE, encoding="utf-8") as f:
+            return bool(json.load(f)["on"])
+    except Exception:
+        return True
 
 
 def relay_apply(hw_on: bool):
@@ -588,6 +615,7 @@ def relay_apply(hw_on: bool):
 
     RELAY_STATE = hw_on
     RELAY_LAST_TOGGLE = time.monotonic()
+    _relay_state_save(hw_on)
 
 
 def relay_forced() -> bool:
@@ -606,10 +634,29 @@ def relay_force_step() -> bool:
     return True
 
 
+def relay_failsafe_step() -> bool:
+    """Se l'inverter non da' una tensione batteria valida da piu' di relay.failsafe_s secondi
+    (default 90), aggancia l'ENEL: senza dati l'automatismo non potrebbe chiuderla a on_v e la
+    batteria arriverebbe allo spegnimento dell'inverter. Poi torna l'automatismo, che la stacca
+    solo a V >= off_v. Ritorna True se ha agganciato."""
+    if relay_forced():
+        return False
+    cfg = CONF.get("relay", {})
+    if not bool(cfg.get("enabled", False)):
+        return False
+    limit = max(30.0, float(cfg.get("failsafe_s", 90)))
+    age = time.monotonic() - RELAY_LAST_VALID_T
+    if age > limit and RELAY_STATE is not True:
+        relay_apply(True)
+        print(f"[relay] FAIL-SAFE: nessuna tensione batteria valida da {age:.0f} s -> ENEL ON", flush=True)
+        return True
+    return False
+
+
 def relay_setup(keep_state: bool = False):
-    """Init GPIO (if available) and set relay to logical OFF (ON se relay.force_on).
-    keep_state=True (re-init dopo un salvataggio config): conserva lo stato logico corrente,
-    altrimenti un "Salva" con ENEL agganciata la sgancerebbe (e tra on_v e off_v resterebbe OFF)."""
+    """Init GPIO (if available). Stato iniziale: ON con relay.force_on; con keep_state (re-init dopo
+    un salvataggio config) lo stato logico corrente; altrimenti l'ultimo stato salvato in
+    data/relay_state.json, e ON se non c'e' (un riavvio non deve staccare l'ENEL mentre serve)."""
     cfg = CONF.get("relay", {})
     if GPIO_BACKEND is None or str(cfg.get("mode", "gpio")).lower() != "gpio":
         print("[relay] Setup skipped: GPIO not available or mode!=gpio", flush=True)
@@ -618,7 +665,12 @@ def relay_setup(keep_state: bool = False):
     active_high = bool(cfg.get("active_high", True))
     forced = relay_forced()   # con la forzatura parte gia' ON: nessun buco OFF->ON al riavvio
     global RELAY_STATE, RELAY_LAST_TOGGLE
-    want_on = forced or (keep_state and RELAY_STATE is True)
+    if forced:
+        want_on = True
+    elif keep_state:
+        want_on = RELAY_STATE is True
+    else:
+        want_on = _relay_state_load()
     initial_level_high = want_on if active_high else (not want_on)
     ok = _gpio_setup_output(pin, initial_level_high)
 
@@ -626,7 +678,7 @@ def relay_setup(keep_state: bool = False):
         RELAY_LAST_TOGGLE = time.monotonic()
     RELAY_STATE = want_on
     rb = _gpio_read(pin)
-    why = "force_on" if forced else ("stato conservato" if want_on else "")
+    why = "force_on" if forced else ("stato conservato" if keep_state else "ultimo stato salvato")
     print(f"[relay] SETUP: backend={GPIO_BACKEND} pin={pin} active_high={active_high} "
           f"-> {'ON' if want_on else 'OFF'}{' (' + why + ')' if why else ''} "
           f"(initial level_high={initial_level_high}, setup_ok={ok}, readback={rb})", flush=True)
@@ -1022,7 +1074,10 @@ def grid_control_step(battery_v, i2c=None):
     """apply.grid OFF -> relay_auto_step INVARIATO (+ log dry-run di cosa farebbe la F4).
     apply.grid ON  -> ENEL = relay_auto_step OR decisione F4 (mai ritardo); spegne solo a
     recupero (V>=off_v, bilanciato, nessun rischio F4). Fail-safe + min_toggle anti-flap."""
+    global RELAY_LAST_VALID_T
     now = time.monotonic()
+    if battery_v is not None and 35.0 < float(battery_v) < 65.0:
+        RELAY_LAST_VALID_T = now
     if battery_v is not None:
         _VBUF.append((now, float(battery_v)))
         while _VBUF and _VBUF[0][0] < now - 180:

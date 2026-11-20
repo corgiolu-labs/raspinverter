@@ -50,6 +50,15 @@
 <section class="card is-warn" id="isProblems" hidden><h3>Da sistemare nelle impostazioni attuali</h3><ul id="isProblemList" style="margin:.3rem 0 0 1.1rem;font-size:.88rem"></ul></section>
 <div class="is-grid" id="isGrid"><div class="card"><p class="is-desc">Lettura delle impostazioni in corso…</p></div></div>
 <section class="card" style="margin-top:12px">
+  <h3>Orologio dell'inverter</h3>
+  <div class="is-row">
+    <div class="is-head"><div class="is-name">Data e ora interne</div><div class="is-cur">attuale <b id="clkInv">—</b></div></div>
+    <div class="is-desc">L'inverter usa l'orologio per i suoi registri e per le fasce orarie. Si regola copiando l'ora del Raspberry, che è sincronizzata via internet. <span id="clkPi"></span></div>
+    <div class="is-ctl"><button class="btn is-apply" id="clkBtn" type="button" disabled>Regola sull'ora del Raspberry</button></div>
+    <div class="is-msg" id="clkMsg"></div>
+  </div>
+</section>
+<section class="card" style="margin-top:12px">
   <h3>Ultime modifiche</h3>
   <div class="is-log" id="isLog">—</div>
 </section>
@@ -124,6 +133,11 @@
     var pl = $('isProblemList'); pl.textContent = '';
     (d.warnings || []).forEach(function (w) { pl.appendChild(el('li', null, w.charAt(0).toUpperCase() + w.slice(1) + '.')); });
     $('isProblems').hidden = !(d.warnings && d.warnings.length);
+    $('clkInv').textContent = d.clock || '—';
+    var dr = d.clock_drift_s;
+    $('clkPi').textContent = 'Raspberry: ' + d.pi_clock + (d.pi_synced ? ' (sincronizzato)' : ' (NON sincronizzato)') +
+      (dr === null || dr === undefined ? '' : Math.abs(dr) <= 5 ? ' · scarto trascurabile.' :
+       ' · scarto ' + (Math.abs(dr) >= 86400 ? Math.round(Math.abs(dr) / 86400) + ' giorni' : Math.abs(dr) >= 60 ? Math.round(Math.abs(dr) / 60) + ' minuti' : Math.abs(dr) + ' s') + (dr < 0 ? ' indietro.' : ' avanti.'));
     $('isLog').textContent = (d.log && d.log.length) ? d.log.join('\n') : 'Nessuna modifica registrata.';
   }
   function load() {
@@ -137,6 +151,14 @@
     fetch('/api/inverter-settings/arm', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ off: !!off }) })
       .then(function (r) { return r.json(); }).then(function (j) { setArm(j.armed_left_s); });
   }
+  $('clkBtn').addEventListener('click', function () {
+    if (!confirm('Regolare l\'orologio dell\'inverter sull\'ora del Raspberry?')) return;
+    var m = $('clkMsg'); m.className = 'is-msg'; m.textContent = 'Scrittura in corso…'; $('clkBtn').disabled = true;
+    fetch('/api/inverter-clock', { method: 'POST' }).then(function (r) { return r.json(); }).then(function (j) {
+      if (j.ok) { m.className = 'is-msg ok'; m.textContent = 'Orologio regolato: ' + j.clock + '.'; setTimeout(load, 800); }
+      else { m.className = 'is-msg err'; m.textContent = 'Non regolato: ' + j.error; $('clkBtn').disabled = armLeft <= 0; }
+    }).catch(function (e) { m.className = 'is-msg err'; m.textContent = 'Errore di rete: ' + e; $('clkBtn').disabled = armLeft <= 0; });
+  });
   $('armBtn').addEventListener('click', function () { arm(false); });
   $('disarmBtn').addEventListener('click', function () { arm(true); });
   var rb = $('btnRefresh'); if (rb) rb.addEventListener('click', load);
