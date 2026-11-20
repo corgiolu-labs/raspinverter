@@ -1653,9 +1653,13 @@ def charge_split_api():
         prev = t
     keys = sorted(buckets)
     ser = lambda i: [round(buckets[k][i] / buckets[k][3]) for k in keys]
+    with db() as con:
+        arch = con.execute("SELECT day, pv_Wh, pv_batt_Wh, grid_batt_Wh FROM archive ORDER BY day DESC LIMIT 30").fetchall()
+    kwh = lambda v: None if v is None else round(float(v) / 1000.0, 2)
+    days = [{"day": r[0], "pv": kwh(r[1]), "pv_batt": kwh(r[2]), "grid_batt": kwh(r[3])} for r in arch][::-1]
     return jsonify({"ok": True, "date": day, "t": keys, "pv_w": ser(0), "pv_batt_w": ser(1), "grid_batt_w": ser(2),
                     "kwh": {k: round(v / 1000.0, 2) for k, v in tot.items()},
-                    "since": rows[0][0] if rows else None})
+                    "since": rows[0][0] if rows else None, "days": days})
 
 @app.route("/api/strings")
 def strings_status():

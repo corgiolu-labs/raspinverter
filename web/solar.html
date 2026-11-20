@@ -23,6 +23,9 @@
       <h3>🔀 Dove va il sole, da dove arriva la carica (oggi)</h3>
       <div class="cs-tot" id="csTot">—</div>
       <div style="position:relative;height:260px"><canvas id="chartSplit" role="img" aria-label="Produzione solare, quota che va in batteria e carica dalla rete, oggi"></canvas></div>
+      <h3 style="margin-top:18px">📅 Giorno per giorno</h3>
+      <div style="position:relative;height:240px"><canvas id="chartDays" role="img" aria-label="Produzione solare, sole verso batteria e rete verso batteria per giorno"></canvas></div>
+      <div class="cs-note" id="csDaysNote"></div>
       <div class="cs-note">Media ogni 5 minuti, dai valori che misura l'inverter. «Sole → batteria» è la quota della produzione che carica la batteria; il resto alimenta la casa. «Rete → batteria» è la carica presa dalla rete.</div>
     </section>
     <style>
@@ -52,6 +55,31 @@
       plugins: { legend: { labels: { usePointStyle: true, boxWidth: 8 } },
         tooltip: { callbacks: { title: function (i) { return i.length ? hhmm(i[0].parsed.x) : ''; }, label: function (i) { return i.dataset.label + ': ' + Math.round(i.parsed.y) + ' W'; } } } } }
   });
+  var days = new Chart(document.getElementById('chartDays'), {
+    type: 'bar',
+    data: { labels: [], datasets: [
+      { label: 'Produzione solare', data: [], backgroundColor: C.pv + 'cc', borderRadius: 3 },
+      { label: 'Sole → batteria', data: [], backgroundColor: C.pvb + 'cc', borderRadius: 3 },
+      { label: 'Rete → batteria', data: [], backgroundColor: C.grid + 'cc', borderRadius: 3 }] },
+    options: { maintainAspectRatio: false, animation: false,
+      scales: { x: { grid: { display: false } }, y: { beginAtZero: true, suggestedMax: 5, ticks: { callback: function (v) { return comma(v, 0) + ' kWh'; } }, grid: { color: 'rgba(148,163,184,.12)' } } },
+      plugins: { legend: { labels: { usePointStyle: true, boxWidth: 8 } },
+        tooltip: { callbacks: { label: function (i) { return i.dataset.label + ': ' + (i.raw === null ? 'non misurato' : comma(i.raw, 2) + ' kWh'); },
+          afterBody: function (i) { if (!i.length) return ''; var r = days.$rows[i[0].dataIndex]; return (r && r.pv > 0.05 && r.pv_batt !== null) ? Math.round(100 * r.pv_batt / r.pv) + '% del sole in batteria' : ''; } } } } }
+  });
+  function showDays(d) {
+    var rows = (d.days || []).slice(), first = null;
+    rows.push({ day: d.date, pv: d.kwh.pv, pv_batt: d.kwh.pv_batt, grid_batt: d.kwh.grid_batt, today: true });
+    rows.forEach(function (r) { if (first === null && r.pv_batt !== null && !r.today) first = r.day; });
+    days.$rows = rows;
+    days.data.labels = rows.map(function (r) { return r.today ? 'oggi' : r.day.slice(8, 10) + '/' + r.day.slice(5, 7); });
+    days.data.datasets[0].data = rows.map(function (r) { return r.pv; });
+    days.data.datasets[1].data = rows.map(function (r) { return r.pv_batt; });
+    days.data.datasets[2].data = rows.map(function (r) { return r.grid_batt; });
+    days.update('none');
+    document.getElementById('csDaysNote').textContent = 'Ultimi 30 giorni dall\'archivio notturno più oggi. La ripartizione sole/rete si registra dal 20/11/2026 sera: per i giorni prima c\'è solo la produzione' +
+      (first ? '; il ' + first.slice(8, 10) + '/' + first.slice(5, 7) + ' è parziale.' : '.');
+  }
   function load() {
     fetch('/api/charge-split', { cache: 'no-store' }).then(function (r) { return r.json(); }).then(function (d) {
       if (!d || !d.ok) return;
@@ -59,6 +87,7 @@
       chart.data.datasets[0].data = pts(d.pv_w); chart.data.datasets[1].data = pts(d.pv_batt_w); chart.data.datasets[2].data = pts(d.grid_batt_w);
       if (d.t.length) { chart.options.scales.x.min = Math.min(300, d.t[0]); chart.options.scales.x.max = Math.max(1200, d.t[d.t.length - 1]); }
       chart.update('none');
+      showDays(d);
       var k = d.kwh, share = k.pv > 0.05 ? Math.round(100 * k.pv_batt / k.pv) : null;
       var box = document.getElementById('csTot'); box.textContent = '';
       [['Produzione', k.pv, C.pv], ['Sole → batteria', k.pv_batt, C.pvb], ['Rete → batteria', k.grid_batt, C.grid]].forEach(function (x) {

@@ -59,6 +59,11 @@ def db_init():
               batt_in_Wh REAL, batt_out_Wh REAL
             );
         """)
+        # Ripartizione della carica, dal 21/11/2026 (NULL per i giorni precedenti: dato non misurato)
+        have_a = {r[1] for r in con.execute("PRAGMA table_info(archive)")}
+        for col in ("pv_batt_Wh", "grid_batt_Wh"):
+            if col not in have_a:
+                con.execute(f"ALTER TABLE archive ADD COLUMN {col} REAL")
 
         print(f"[db] Creating battery_counters table...", flush=True)
         con.execute("""
@@ -136,7 +141,11 @@ def _archive_compute_and_apply(cutoff: str, apply: bool) -> Dict[str, Any]:
                      AVG(pv_w) AS pv_w,
                      AVG(battery_w) AS battery_w,
                      AVG(load_w) AS load_w,
-                     AVG(grid_w) AS grid_w
+                     AVG(grid_w) AS grid_w,
+                     -- NULL se nel minuto non c'e' il dato (campioni precedenti al 20/11/2026)
+                     AVG(CASE WHEN pv_charge_w IS NULL THEN NULL WHEN pv_charge_w > 0 THEN pv_charge_w ELSE 0 END) AS pv_batt_w,
+                     AVG(CASE WHEN grid_charge_a IS NULL OR battery_v IS NULL THEN NULL
+                              WHEN grid_charge_a > 0 THEN grid_charge_a * battery_v ELSE 0 END) AS grid_batt_w
               FROM samples
               WHERE timestamp < ?
               GROUP BY ts_min
@@ -147,7 +156,9 @@ def _archive_compute_and_apply(cutoff: str, apply: bool) -> Dict[str, Any]:
               SUM(load_w)/60.0      AS load_Wh,
               SUM(grid_w)/60.0      AS grid_Wh,
               SUM(CASE WHEN battery_w>0 THEN battery_w ELSE 0 END)/60.0  AS batt_in_Wh,
-              SUM(CASE WHEN battery_w<0 THEN -battery_w ELSE 0 END)/60.0 AS batt_out_Wh
+              SUM(CASE WHEN battery_w<0 THEN -battery_w ELSE 0 END)/60.0 AS batt_out_Wh,
+              SUM(pv_batt_w)/60.0   AS pv_batt_Wh,
+              SUM(grid_batt_w)/60.0 AS grid_batt_Wh
             FROM m
             GROUP BY day
             ORDER BY day ASC;
@@ -158,9 +169,10 @@ def _archive_compute_and_apply(cutoff: str, apply: bool) -> Dict[str, Any]:
             for r in rows:
                 con.execute("""
                     INSERT OR REPLACE INTO archive
-                      (day, pv_Wh, load_Wh, grid_Wh, batt_in_Wh, batt_out_Wh)
-                    VALUES (?,?,?,?,?,?)
-                """, (r["day"], r["pv_Wh"], r["load_Wh"], r["grid_Wh"], r["batt_in_Wh"], r["batt_out_Wh"]))
+                      (day, pv_Wh, load_Wh, grid_Wh, batt_in_Wh, batt_out_Wh, pv_batt_Wh, grid_batt_Wh)
+                    VALUES (?,?,?,?,?,?,?,?)
+                """, (r["day"], r["pv_Wh"], r["load_Wh"], r["grid_Wh"], r["batt_in_Wh"], r["batt_out_Wh"],
+                      r["pv_batt_Wh"], r["grid_batt_Wh"]))
             con.execute("DELETE FROM samples WHERE timestamp < ?", (cutoff,))
             con.commit()
 
