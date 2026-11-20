@@ -177,15 +177,18 @@ def poll_loop():
                               battery_w,battery_v,battery_a,
                               grid_w,grid_v,grid_hz,grid_a,
                               load_w,load_v,load_hz,load_a,load_va,load_pf,load_percent,
-                              dc_temp,inverter_temp,heatsink_temp,dc_bus_v)
-                            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                              dc_temp,inverter_temp,heatsink_temp,dc_bus_v,
+                              work_mode,faults,warnings,inv_w,pv_charge_w,pv_charge_a,grid_charge_a,inv_soc)
+                            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                         """, (
                             s["timestamp"],
                             s.get("pv_w"), s.get("pv_v"), s.get("pv_a"),
                             s.get("battery_w"), s.get("battery_v"), s.get("battery_a"),
                             s.get("grid_w"), s.get("grid_v"), s.get("grid_hz"), s.get("grid_a"),
                             s.get("load_w"), s.get("load_v"), s.get("load_hz"), s.get("load_a"), s.get("load_va"), s.get("load_pf"), s.get("load_percent"),
-                            s.get("dc_temp"), s.get("inverter_temp"), s.get("heatsink_temp"), s.get("dc_bus_v")
+                            s.get("dc_temp"), s.get("inverter_temp"), s.get("heatsink_temp"), s.get("dc_bus_v"),
+                            s.get("work_mode"), s.get("faults"), s.get("warnings"), s.get("inv_w"),
+                            s.get("pv_charge_w"), s.get("pv_charge_a"), s.get("grid_charge_a"), s.get("inv_soc")
                         ))
                         if i2c_snapshot is not None:
                             con.execute(
@@ -1559,6 +1562,100 @@ def battery_autocal():
         "hold_seconds": float(_get("battery.autocal.hold_seconds", 600)),
         "min_pv_w": float(_get("battery.autocal.min_pv_w", 50.0)),
     })
+
+# Avvisi dell'inverter che non vanno in evidenza: fotovoltaico basso (di notte e' normale) e
+# "batteria da ricaricare fino al punto di ripristino" (accompagna ogni passaggio alla rete).
+_WARN_QUIET = {6, 15, 12}
+_WARN_GRID = {0, 1, 2, 3, 4, 5}   # riguardano la rete: senza senso quando il rele' ENEL e' aperto
+
+def _relay_age_s():
+    return time.monotonic() - float(getattr(hardware, "RELAY_LAST_TOGGLE", 0.0) or 0.0)
+
+def _coherence(rows, relay_on, age_s, on_v):
+    """Controlli tra rele' ENEL e stato dell'inverter. rows = campioni recenti (dal piu' nuovo).
+    Una condizione conta solo se vale per tutto l'intervallo richiesto e il rele' non e'
+    cambiato nel frattempo."""
+    def all_rows(seconds, cond):
+        cut = (datetime.now() - timedelta(seconds=seconds)).strftime("%Y-%m-%d %H:%M:%S")
+        win = [r for r in rows if r["timestamp"] >= cut]
+        return len(win) >= max(3, seconds // 10) and all(cond(r) for r in win)
+    out = []
+    gv = lambda r: float(r["grid_v"] or 0.0)
+    if relay_on and age_s > 180 and all_rows(180, lambda r: gv(r) < 180):
+        out.append("Relè ENEL agganciato da %d minuti ma all'inverter non arriva la rete: controlla contattore e interruttore." % (age_s // 60))
+    if relay_on and age_s > 180 and all_rows(180, lambda r: gv(r) >= 180 and r["work_mode"] == 3 and float(r["battery_v"] or 99) < on_v - 0.5):
+        out.append("La rete arriva ma l'inverter resta a batteria sotto %s V: controlla la soglia di passaggio alla rete." % str(on_v - 0.5).replace(".", ","))
+    if (not relay_on) and age_s > 60 and all_rows(60, lambda r: gv(r) >= 180):
+        out.append("Relè ENEL aperto ma l'inverter vede la rete: il contattore potrebbe essere rimasto chiuso.")
+    return out
+
+@app.route("/api/inverter-status")
+def inverter_status_api():
+    """Modo di funzionamento, guasti, avvisi filtrati e coerenza con il relè ENEL."""
+    with db() as con:
+        con.row_factory = sqlite3.Row
+        rows = [dict(r) for r in con.execute(
+            "SELECT timestamp, work_mode, faults, warnings, grid_v, battery_v, inv_soc, pv_charge_a, grid_charge_a "
+            "FROM samples ORDER BY id DESC LIMIT 60").fetchall()]
+    if not rows or rows[0].get("work_mode") is None:
+        return jsonify({"ok": False, "error": "stato dell'inverter non ancora disponibile"})
+    r0 = rows[0]
+    relay_on = hardware.RELAY_STATE is True
+    age = _relay_age_s()
+    mode = int(r0["work_mode"])
+    faults = inverter_registers._bits(int(r0["faults"] or 0), inverter_registers.FAULT_BITS)
+    warns, quiet = [], []
+    for b in range(32):
+        if int(r0["warnings"] or 0) >> b & 1:
+            name = inverter_registers.WARNING_BITS.get(b, "bit %d" % b)
+            grid_off = b in _WARN_GRID and (not relay_on or age < 120)
+            (quiet if (b in _WARN_QUIET or grid_off) else warns).append(name)
+    try:
+        on_v = float(_get("relay.on_v", 48.0))
+    except Exception:
+        on_v = 48.0
+    return jsonify({
+        "ok": True, "timestamp": r0["timestamp"],
+        "mode": mode, "mode_text": inverter_registers.WORK_MODE.get(mode, "modo %d" % mode),
+        "faults": faults, "warnings": warns, "quiet_warnings": quiet,
+        "coherence": _coherence(rows, relay_on, age, on_v),
+        "relay_on": relay_on, "relay_age_s": round(age), "force_on": relay_forced(),
+        "inv_soc": r0["inv_soc"], "pv_charge_a": r0["pv_charge_a"], "grid_charge_a": r0["grid_charge_a"],
+    })
+
+@app.route("/api/charge-split")
+def charge_split_api():
+    """Dove va il sole e da dove arriva la carica, media ogni 5 minuti del giorno corrente
+    (i campioni di dettaglio restano solo per oggi), con i totali in kWh."""
+    day = datetime.now().strftime("%Y-%m-%d")
+    with db() as con:
+        rows = con.execute(
+            "SELECT timestamp, pv_w, pv_charge_w, grid_charge_a, battery_v, battery_w, load_w FROM samples "
+            "WHERE timestamp >= ? AND pv_charge_w IS NOT NULL ORDER BY timestamp", (day + " 00:00:00",)).fetchall()
+    buckets, tot, prev = {}, {"pv": 0.0, "pv_batt": 0.0, "grid_batt": 0.0}, None
+    for ts, pv, pvc, gca, bv, bw, lw in rows:
+        try:
+            t = datetime.strptime(ts, "%Y-%m-%d %H:%M:%S")
+        except Exception:
+            continue
+        gcw = max(0.0, float(gca or 0) * float(bv or 0))
+        vals = (max(0.0, float(pv or 0)), max(0.0, float(pvc or 0)), gcw)
+        m = t.hour * 60 + t.minute
+        b = buckets.setdefault(m - m % 5, [0.0, 0.0, 0.0, 0])
+        for i in range(3):
+            b[i] += vals[i]
+        b[3] += 1
+        if prev is not None:
+            dt = (t - prev).total_seconds()
+            if 0 < dt <= 60:
+                h = dt / 3600.0
+                tot["pv"] += vals[0] * h; tot["pv_batt"] += vals[1] * h; tot["grid_batt"] += vals[2] * h
+        prev = t
+    keys = sorted(buckets)
+    ser = lambda i: [round(buckets[k][i] / buckets[k][3]) for k in keys]
+    return jsonify({"ok": True, "date": day, "t": keys, "pv_w": ser(0), "pv_batt_w": ser(1), "grid_batt_w": ser(2),
+                    "kwh": {k: round(v / 1000.0, 2) for k, v in tot.items()},
+                    "since": rows[0][0] if rows else None})
 
 @app.route("/api/strings")
 def strings_status():

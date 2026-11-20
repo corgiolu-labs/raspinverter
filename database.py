@@ -43,6 +43,11 @@ def db_init():
               dc_temp REAL, inverter_temp REAL, heatsink_temp REAL, dc_bus_v REAL
             );
         """)
+        # Colonne aggiunte il 20/11/2026 (stato dell'inverter e ripartizione della carica)
+        have = {r[1] for r in con.execute("PRAGMA table_info(samples)")}
+        for col in ("work_mode", "faults", "warnings", "inv_w", "pv_charge_w", "pv_charge_a", "grid_charge_a", "inv_soc"):
+            if col not in have:
+                con.execute(f"ALTER TABLE samples ADD COLUMN {col} REAL")
         con.execute("CREATE INDEX IF NOT EXISTS idx_ts ON samples(timestamp);")
         con.execute("CREATE UNIQUE INDEX IF NOT EXISTS uniq_ts ON samples(timestamp);")
 

@@ -258,8 +258,18 @@ def _to_signed16(x: int) -> int:
     return x - 0x10000 if x >= 0x8000 else x
 
 
-def _blocks(max_gap=1, max_len=16):
-    items = sorted(REGS, key=lambda r: r[1])
+# Registri di stato letti in piu' a ogni giro. Facoltativi: se un blocco non risponde si salta,
+# senza far fallire la lettura principale (REGS).
+EXTRA_REGS: Tuple[Tuple[str, int, float], ...] = (
+    ("fault_hi", 100, 1), ("fault_lo", 101, 1), ("warn_hi", 108, 1), ("warn_lo", 109, 1),
+    ("work_mode", 201, 1), ("inv_w", 208, 1),
+    ("pv_charge_w", 224, 1), ("inv_soc", 229, 1), ("grid_charge_a", 233, 0.1), ("pv_charge_a", 234, 0.1),
+)
+EXTRA_SIGNED = {"inv_w", "pv_charge_w", "grid_charge_a", "pv_charge_a"}
+
+
+def _blocks(max_gap=1, max_len=16, regs=None):
+    items = sorted(REGS if regs is None else regs, key=lambda r: r[1])
     out: List[Tuple[int, List[Tuple[str, int, float]]]] = []
     cur: List[Tuple[str, int, float]] = []
     start = None
@@ -399,6 +409,26 @@ def _read_regs_pymodbus() -> Optional[Dict[str, Any]]:
                 if name in SIGNED:
                     raw = _to_signed16(raw)
                 out[name] = float(raw) * scale
+        for start, block in _blocks(max_gap=10, regs=EXTRA_REGS):   # 3 letture: 100-109, 201-208, 224-234
+            try:
+                count = block[-1][1] - start + 1
+                if _PYMB_V3:
+                    rr = cli.read_holding_registers(start, count=count, **{_UNIT_KW: UNIT_ID})
+                else:
+                    rr = cli.read_holding_registers(start, count, unit=UNIT_ID)
+                if hasattr(rr, "isError") and rr.isError():
+                    continue
+                for name, addr, scale in block:
+                    raw = int(rr.registers[addr - start])
+                    if name in EXTRA_SIGNED:
+                        raw = _to_signed16(raw)
+                    out[name] = float(raw) * scale
+            except Exception:
+                continue
+        if out.get("fault_hi") is not None and out.get("fault_lo") is not None:
+            out["faults"] = (int(out.pop("fault_hi")) << 16) | int(out.pop("fault_lo"))
+        if out.get("warn_hi") is not None and out.get("warn_lo") is not None:
+            out["warnings"] = (int(out.pop("warn_hi")) << 16) | int(out.pop("warn_lo"))
         return out
     except Exception as e:
         LAST_ERR = str(e)

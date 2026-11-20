@@ -19,5 +19,62 @@
         </div>
       </div>
     </section>
+    <section class="card" style="margin-top:12px">
+      <h3>🔀 Dove va il sole, da dove arriva la carica (oggi)</h3>
+      <div class="cs-tot" id="csTot">—</div>
+      <div style="position:relative;height:260px"><canvas id="chartSplit" role="img" aria-label="Produzione solare, quota che va in batteria e carica dalla rete, oggi"></canvas></div>
+      <div class="cs-note">Media ogni 5 minuti, dai valori che misura l'inverter. «Sole → batteria» è la quota della produzione che carica la batteria; il resto alimenta la casa. «Rete → batteria» è la carica presa dalla rete.</div>
+    </section>
+    <style>
+      .cs-tot { display:flex; flex-wrap:wrap; gap:8px 18px; margin:4px 0 10px; font-size:.9rem; }
+      .cs-tot b { font-variant-numeric:tabular-nums; }
+      .cs-tot i { display:inline-block; width:10px; height:10px; border-radius:2px; margin-right:5px; vertical-align:0; }
+      .cs-note { color:var(--muted); font-size:.78rem; margin-top:8px; line-height:1.4; }
+    </style>
 {% endblock %}
-{% block scripts %}<script src="/app.mod.js?v=20261108b"></script>{% endblock %}
+{% block scripts %}<script src="/app.mod.js?v=20261108b"></script>
+{% raw %}
+<script>
+(function () {
+  if (!window.Chart) return;
+  var C = { pv: '#f59e0b', pvb: '#22c55e', grid: '#60a5fa' };
+  var comma = function (v, d) { return Number(v).toFixed(d).replace('.', ','); };
+  var hhmm = function (m) { return String(Math.floor(m / 60)).padStart(2, '0') + ':' + String(m % 60).padStart(2, '0'); };
+  function ds(label, color, fill) {
+    return { label: label, data: [], borderColor: color, backgroundColor: color + (fill ? '33' : '00'), fill: fill ? 'origin' : false, borderWidth: 2, pointRadius: 0, tension: .25, spanGaps: false };
+  }
+  var chart = new Chart(document.getElementById('chartSplit'), {
+    type: 'line',
+    data: { datasets: [ds('Produzione solare', C.pv, false), ds('Sole → batteria', C.pvb, true), ds('Rete → batteria', C.grid, true)] },
+    options: { maintainAspectRatio: false, animation: false, parsing: false, interaction: { mode: 'index', intersect: false },
+      scales: { x: { type: 'linear', min: 300, max: 1200, ticks: { stepSize: 120, callback: function (v) { return hhmm(v); } }, grid: { color: 'rgba(148,163,184,.12)' } },
+                y: { beginAtZero: true, suggestedMax: 1000, ticks: { callback: function (v) { return v >= 1000 ? comma(v / 1000, 1) + ' kW' : v + ' W'; } }, grid: { color: 'rgba(148,163,184,.12)' } } },
+      plugins: { legend: { labels: { usePointStyle: true, boxWidth: 8 } },
+        tooltip: { callbacks: { title: function (i) { return i.length ? hhmm(i[0].parsed.x) : ''; }, label: function (i) { return i.dataset.label + ': ' + Math.round(i.parsed.y) + ' W'; } } } } }
+  });
+  function load() {
+    fetch('/api/charge-split', { cache: 'no-store' }).then(function (r) { return r.json(); }).then(function (d) {
+      if (!d || !d.ok) return;
+      var pts = function (arr) { return d.t.map(function (t, i) { return { x: t, y: arr[i] }; }); };
+      chart.data.datasets[0].data = pts(d.pv_w); chart.data.datasets[1].data = pts(d.pv_batt_w); chart.data.datasets[2].data = pts(d.grid_batt_w);
+      if (d.t.length) { chart.options.scales.x.min = Math.min(300, d.t[0]); chart.options.scales.x.max = Math.max(1200, d.t[d.t.length - 1]); }
+      chart.update('none');
+      var k = d.kwh, share = k.pv > 0.05 ? Math.round(100 * k.pv_batt / k.pv) : null;
+      var box = document.getElementById('csTot'); box.textContent = '';
+      [['Produzione', k.pv, C.pv], ['Sole → batteria', k.pv_batt, C.pvb], ['Rete → batteria', k.grid_batt, C.grid]].forEach(function (x) {
+        var s = document.createElement('span'), i = document.createElement('i'), b = document.createElement('b');
+        i.style.background = x[2]; b.textContent = comma(x[1], 2) + ' kWh';
+        s.appendChild(i); s.appendChild(document.createTextNode(x[0] + ' ')); s.appendChild(b); box.appendChild(s);
+      });
+      if (share !== null) { var s2 = document.createElement('span'); s2.textContent = share + '% del sole è andato in batteria'; box.appendChild(s2); }
+      if (d.since && d.since.slice(0, 10) === d.date && d.since.slice(11, 16) > '00:10') {
+        var s3 = document.createElement('span'); s3.style.color = 'var(--muted)'; s3.textContent = '(dati dalle ' + d.since.slice(11, 16) + ')'; box.appendChild(s3);
+      }
+    }).catch(function () { /* offline */ });
+  }
+  load();
+  setInterval(load, 60000);
+})();
+</script>
+{% endraw %}
+{% endblock %}

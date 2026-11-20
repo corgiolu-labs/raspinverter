@@ -20,11 +20,14 @@
         <button id="btnRefresh" class="btn" type="button">Aggiorna</button>
         <button id="btnInstall" class="btn btn--secondary" type="button" style="display:none" title="Installa l'app sul dispositivo">Installa app</button>
         <span id="balBadge" class="badge" style="background:#1e293b;color:#cbd5e1" role="status" title="Stato dei bilanciatori">⚖ <span class="bal-prefix">Bilanciatori: </span><span id="balBadgeState">…</span></span>
+        <span id="modeBadge" class="badge" style="background:#1e293b;color:#cbd5e1" role="status" title="Cosa sta facendo l'inverter" hidden>…</span>
         <span id="lastUpdate" class="badge" style="opacity:.7" role="status" aria-label="Ultimo aggiornamento">--:--</span>
         <span id="connBadge" class="badge badge-off" role="status" aria-live="polite">OFF LINE</span>
       </div>
     </div>
     {% block banner %}<div id="errorBanner" class="banner" role="alert" aria-live="polite" hidden></div>{% endblock %}
+    <div id="invFault" class="banner" style="background:#7f1d1d;color:#fef2f2;border-color:#ef4444;font-weight:600" role="alert" aria-live="assertive" hidden></div>
+    <div id="invAlert" class="banner warn" role="alert" aria-live="polite" hidden></div>
     <div id="stringAlert" class="banner warn" role="alert" aria-live="polite" hidden></div>
     <div id="balanceActive" class="banner ok" style="background:#047857;color:#ecfdf5;border-color:#10b981;font-weight:600;animation:none" role="status" aria-live="polite" hidden></div>
   </header>
@@ -62,6 +65,27 @@
     }
     poll();
     setInterval(poll, 30000);
+  })();
+  (function () {
+    var fault = document.getElementById('invFault'), alert = document.getElementById('invAlert'), pill = document.getElementById('modeBadge');
+    if (!fault || !alert || !pill) return;
+    var STYLE = { 2: ['#1e3a8a', '#dbeafe', '🔌 Da rete'], 3: ['#14532d', '#dcfce7', '🔋 A batteria'], 4: ['#713f12', '#fef9c3', '↪ Bypass'],
+                  5: ['#1e3a8a', '#dbeafe', '⚡ In carica'], 6: ['#7f1d1d', '#fef2f2', '⛔ Guasto'], 0: ['#1e293b', '#cbd5e1', '⏻ Accensione'], 1: ['#1e293b', '#cbd5e1', '⏸ Standby'] };
+    function poll() {
+      fetch('/api/inverter-status', { cache: 'no-store' }).then(function (r) { return r.json(); }).then(function (d) {
+        if (!d || !d.ok) { pill.hidden = true; return; }
+        var st = STYLE[d.mode] || ['#1e293b', '#cbd5e1', d.mode_text];
+        pill.textContent = st[2]; pill.style.background = st[0]; pill.style.color = st[1]; pill.hidden = false;
+        pill.title = 'Inverter: ' + d.mode_text + ' · relè ENEL ' + (d.relay_on ? 'agganciato' : 'aperto') + (d.force_on ? ' (forzato)' : '') +
+          (d.quiet_warnings && d.quiet_warnings.length ? '\nAvvisi normali: ' + d.quiet_warnings.join(', ') : '');
+        var f = (d.faults || []).length ? '⛔ Guasto dell\'inverter: ' + d.faults.join(', ') + '. Controlla il display.' : (d.mode === 6 ? '⛔ L\'inverter è in stato di guasto. Controlla il display.' : '');
+        fault.textContent = f; fault.hidden = !f;
+        var a = (d.warnings || []).map(function (w) { return 'Inverter: ' + w.charAt(0).toLowerCase() + w.slice(1); }).concat(d.coherence || []);
+        alert.textContent = a.length ? '⚠ ' + a.join(' · ') : ''; alert.hidden = !a.length;
+      }).catch(function () { /* offline: lascia lo stato attuale */ });
+    }
+    poll();
+    setInterval(poll, 15000);
   })();
   (function () {
     var box = document.getElementById('balanceActive');
