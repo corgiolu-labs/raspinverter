@@ -1,0 +1,148 @@
+{% extends "_base.html" %}
+{% block title %}Imposta inverter · Inverter{% endblock %}
+{% block brand %}🎛️ Imposta inverter{% endblock %}
+{% block banner %}{% endblock %}
+{% block head_extra %}
+{% raw %}
+<style>
+  .is-warn { border:1px solid rgba(245,158,11,.45); background:rgba(245,158,11,.08); }
+  .is-warn p { margin:.3rem 0; font-size:.88rem; line-height:1.45; }
+  .is-arm { display:flex; flex-wrap:wrap; align-items:center; gap:10px; margin-top:10px; }
+  .is-state { font-weight:700; }
+  .is-state.on { color:#f59e0b; }
+  .is-grid { display:grid; gap:12px; grid-template-columns:repeat(auto-fit,minmax(340px,1fr)); margin-top:12px; }
+  .is-row { padding:10px 0; border-bottom:1px solid rgba(255,255,255,.06); }
+  .is-row:last-child { border-bottom:0; }
+  .is-head { display:flex; justify-content:space-between; gap:10px; align-items:baseline; }
+  .is-name { font-weight:600; font-size:.92rem; }
+  .is-cur { color:var(--muted); font-size:.82rem; white-space:nowrap; }
+  .is-cur b { color:var(--text); }
+  .is-desc { color:var(--muted); font-size:.8rem; line-height:1.4; margin:3px 0 8px; }
+  .is-ctl { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+  .is-ctl input, .is-ctl select { background:var(--surface); color:var(--text); border:1px solid var(--border); border-radius:8px; padding:6px 8px; font-size:.9rem; color-scheme:dark; }
+  .is-ctl input { width:7em; }
+  .is-ctl .unit { color:var(--muted); font-size:.85rem; }
+  .is-msg { font-size:.8rem; margin-top:6px; }
+  .is-msg.ok { color:#4ade80; } .is-msg.err { color:#f87171; }
+  .imp { display:inline-block; margin-left:6px; padding:0 7px; border-radius:999px; font-size:.68rem; font-weight:500; vertical-align:1px; }
+  .imp.alto { background:rgba(245,158,11,.2); color:#f59e0b; }
+  .imp.medio { background:rgba(59,130,246,.2); color:#93c5fd; }
+  .imp.basso { background:rgba(148,163,184,.2); color:#cbd5e1; }
+  .is-log { font-size:.78rem; color:var(--muted); font-variant-numeric:tabular-nums; line-height:1.6; white-space:pre-wrap; word-break:break-word; }
+  .is-arm [hidden], #isProblems[hidden] { display:none !important; }
+  button[disabled] { opacity:.45; cursor:not-allowed; }
+  @media (max-width:420px) { .is-grid { grid-template-columns:1fr; } }
+</style>
+{% endraw %}
+{% endblock %}
+{% block footer %}Scrittura delle impostazioni dell'inverter · solo voci sicure, con verifica{% endblock %}
+{% block content %}
+<section class="card is-warn">
+  <h3>⚠️ Modifiche reali sull'inverter</h3>
+  <p>Ogni valore applicato viene scritto <b>davvero</b> nell'inverter e cambia il suo comportamento. Le stesse impostazioni si possono riportare indietro da qui o dal pannello dell'inverter.</p>
+  <p>Qui compaiono solo le voci giudicate sicure, con limiti più stretti di quelli dell'inverter. Prima di scrivere il Raspberry rilegge il valore attuale e controlla che le tensioni restino coerenti tra loro, poi verifica che l'inverter abbia preso il nuovo valore. Accensione e spegnimento remoto, tensione d'uscita ed equalizzazione non sono modificabili.</p>
+  <div class="is-arm">
+    <span>Scrittura: <span class="is-state" id="armState">disabilitata</span></span>
+    <button class="btn" id="armBtn" type="button">Abilita per 10 minuti</button>
+    <button class="btn btn--secondary" id="disarmBtn" type="button" hidden>Disabilita</button>
+  </div>
+</section>
+<section class="card is-warn" id="isProblems" hidden><h3>Da sistemare nelle impostazioni attuali</h3><ul id="isProblemList" style="margin:.3rem 0 0 1.1rem;font-size:.88rem"></ul></section>
+<div class="is-grid" id="isGrid"><div class="card"><p class="is-desc">Lettura delle impostazioni in corso…</p></div></div>
+<section class="card" style="margin-top:12px">
+  <h3>Ultime modifiche</h3>
+  <div class="is-log" id="isLog">—</div>
+</section>
+{% endblock %}
+{% block scripts %}
+{% raw %}
+<script>
+(function () {
+  var $ = function (id) { return document.getElementById(id); };
+  function el(tag, cls, text) { var e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; }
+  var armLeft = 0, armTimer = null;
+  var fmtNum = function (v, step) { var d = String(step).indexOf('.') >= 0 ? String(step).split('.')[1].length : 0; return Number(v).toFixed(d).replace('.', ','); };
+  function show(spec, v) {
+    if (spec.options) { var o = spec.options.filter(function (x) { return x.value === v; })[0]; return o ? o.label : String(v); }
+    return fmtNum(v, spec.step) + ' ' + spec.unit;
+  }
+  function setArm(s) {
+    armLeft = s || 0;
+    var on = armLeft > 0;
+    $('armState').textContent = on ? ('abilitata, ancora ' + Math.floor(armLeft / 60) + ':' + String(armLeft % 60).padStart(2, '0')) : 'disabilitata';
+    $('armState').className = 'is-state' + (on ? ' on' : '');
+    $('armBtn').hidden = on; $('disarmBtn').hidden = !on;
+    document.querySelectorAll('.is-apply').forEach(function (b) { b.disabled = !on; });
+    if (armTimer) clearInterval(armTimer);
+    if (on) armTimer = setInterval(function () { setArm(armLeft - 1); }, 1000);
+  }
+  function render(d) {
+    var grid = $('isGrid'); grid.textContent = '';
+    var groups = [];
+    d.items.forEach(function (i) { if (groups.indexOf(i.group) < 0) groups.push(i.group); });
+    groups.forEach(function (g) {
+      var card = el('div', 'card'); card.appendChild(el('h3', null, g));
+      d.items.filter(function (i) { return i.group === g; }).forEach(function (spec) {
+        var row = el('div', 'is-row');
+        var head = el('div', 'is-head');
+        var name = el('div', 'is-name', spec.label); name.appendChild(el('span', 'imp ' + spec.impact, 'impatto ' + spec.impact));
+        head.appendChild(name);
+        var cur = el('div', 'is-cur', 'attuale '); cur.appendChild(el('b', null, spec.value === null ? '—' : show(spec, spec.value)));
+        head.appendChild(cur); row.appendChild(head);
+        row.appendChild(el('div', 'is-desc', spec.desc));
+        var ctl = el('div', 'is-ctl'), input;
+        if (spec.options) {
+          input = el('select');
+          spec.options.forEach(function (o) { var op = el('option', null, o.label); op.value = o.value; if (o.value === spec.value) op.selected = true; input.appendChild(op); });
+        } else {
+          input = el('input'); input.type = 'number'; input.min = spec.min; input.max = spec.max; input.step = spec.step;
+          if (spec.value !== null) input.value = spec.value;
+          ctl.appendChild(input); ctl.appendChild(el('span', 'unit', spec.unit + ' (' + fmtNum(spec.min, spec.step) + '–' + fmtNum(spec.max, spec.step) + ')'));
+        }
+        if (spec.options) ctl.appendChild(input);
+        var btn = el('button', 'btn is-apply', 'Applica'); btn.type = 'button'; btn.disabled = armLeft <= 0;
+        ctl.appendChild(btn); row.appendChild(ctl);
+        var msg = el('div', 'is-msg'); row.appendChild(msg);
+        btn.addEventListener('click', function () {
+          var nv = Number(input.value);
+          if (!spec.options && (input.value === '' || isNaN(nv))) { msg.className = 'is-msg err'; msg.textContent = 'Inserisci un numero.'; return; }
+          if (nv === spec.value) { msg.className = 'is-msg ok'; msg.textContent = 'Valore già impostato.'; return; }
+          if (!confirm('Scrivere sull\'inverter?\n\n' + spec.label + '\nda: ' + show(spec, spec.value) + '\na:  ' + show(spec, nv))) return;
+          btn.disabled = true; msg.className = 'is-msg'; msg.textContent = 'Scrittura in corso…';
+          fetch('/api/inverter-settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ addr: spec.addr, value: nv, expect_raw: spec.raw }) })
+            .then(function (r) { return r.json(); })
+            .then(function (j) {
+              if (j.ok) { msg.className = 'is-msg ok'; msg.textContent = j.noop ? j.message : ('Scritto e verificato: ' + show(spec, j.new) + '.'); setTimeout(load, 800); }
+              else { msg.className = 'is-msg err'; msg.textContent = 'Non scritto: ' + j.error; btn.disabled = armLeft <= 0; }
+            })
+            .catch(function (e) { msg.className = 'is-msg err'; msg.textContent = 'Errore di rete: ' + e; btn.disabled = armLeft <= 0; });
+        });
+        card.appendChild(row);
+      });
+      grid.appendChild(card);
+    });
+    var pl = $('isProblemList'); pl.textContent = '';
+    (d.warnings || []).forEach(function (w) { pl.appendChild(el('li', null, w.charAt(0).toUpperCase() + w.slice(1) + '.')); });
+    $('isProblems').hidden = !(d.warnings && d.warnings.length);
+    $('isLog').textContent = (d.log && d.log.length) ? d.log.join('\n') : 'Nessuna modifica registrata.';
+  }
+  function load() {
+    fetch('/api/inverter-settings', { cache: 'no-store' }).then(function (r) { return r.json(); }).then(function (d) {
+      if (d && d.ok) { setArm(d.armed_left_s); render(d); setArm(d.armed_left_s); }
+      else $('isGrid').textContent = 'L\'inverter non ha risposto: ' + ((d && d.error) || 'errore sconosciuto');
+    }).catch(function () { /* offline */ });
+  }
+  function arm(off) {
+    if (!off && !confirm('Abilitare la scrittura sull\'inverter per 10 minuti?')) return;
+    fetch('/api/inverter-settings/arm', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ off: !!off }) })
+      .then(function (r) { return r.json(); }).then(function (j) { setArm(j.armed_left_s); });
+  }
+  $('armBtn').addEventListener('click', function () { arm(false); });
+  $('disarmBtn').addEventListener('click', function () { arm(true); });
+  var rb = $('btnRefresh'); if (rb) rb.addEventListener('click', load);
+  load();
+})();
+</script>
+{% endraw %}
+<script src="/status.mod.js?v=20261108"></script>
+{% endblock %}

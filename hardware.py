@@ -296,6 +296,75 @@ def read_regs() -> Optional[Dict[str, Any]]:
     return None
 
 
+def write_holding_fc16(addr: int, raw: int) -> Tuple[bool, str]:
+    """Scrive UN registro holding con FC16 (l'inverter ignora FC06). Chi la chiama tiene il lock
+    del poll e ha gia' validato indirizzo e valore. Ritorna (ok, messaggio)."""
+    if ModbusSerialClient is None:
+        return False, "libreria Modbus non disponibile"
+    cli = None
+    try:
+        if _PYMB_V3:
+            cli = ModbusSerialClient(port=MB_PORT, baudrate=MB_BAUD, parity=MB_PARITY,
+                                     stopbits=MB_STOP, bytesize=MB_BYTES, timeout=1.5, retries=1)
+        else:
+            cli = ModbusSerialClient(method="rtu", port=MB_PORT, baudrate=MB_BAUD,
+                                     parity=MB_PARITY, stopbits=MB_STOP, bytesize=MB_BYTES, timeout=1.5)
+        if not cli.connect():
+            return False, "connessione seriale fallita"
+        if _PYMB_V3:
+            rr = cli.write_registers(int(addr), [int(raw)], **{_UNIT_KW: UNIT_ID})
+        else:
+            rr = cli.write_registers(int(addr), [int(raw)], unit=UNIT_ID)
+        if hasattr(rr, "isError") and rr.isError():
+            return False, "l'inverter ha rifiutato il valore (%s)" % rr
+        return True, "ok"
+    except Exception as e:
+        return False, "nessuna risposta dall'inverter (%s)" % type(e).__name__
+    finally:
+        with contextlib.suppress(Exception):
+            if cli is not None:
+                cli.close()
+
+
+def read_holding_blocks(blocks) -> Optional[Dict[int, int]]:
+    """Lettura SOLA dei registri holding per la pagina Registri: {indirizzo: valore grezzo}.
+    blocks = ((inizio, quantita'), ...). Un blocco rifiutato viene saltato. None se il bus non risponde.
+    Chi la chiama deve tenere il lock del poll: il bus RS485 e' uno solo."""
+    if ModbusSerialClient is None:
+        return None
+    cli = None
+    try:
+        if _PYMB_V3:
+            cli = ModbusSerialClient(port=MB_PORT, baudrate=MB_BAUD, parity=MB_PARITY,
+                                     stopbits=MB_STOP, bytesize=MB_BYTES, timeout=MB_TIMEOUT)
+        else:
+            cli = ModbusSerialClient(method="rtu", port=MB_PORT, baudrate=MB_BAUD,
+                                     parity=MB_PARITY, stopbits=MB_STOP, bytesize=MB_BYTES,
+                                     timeout=MB_TIMEOUT)
+        if not cli.connect():
+            return None
+        out: Dict[int, int] = {}
+        for start, count in blocks:
+            try:
+                if _PYMB_V3:
+                    rr = cli.read_holding_registers(start, count=count, **{_UNIT_KW: UNIT_ID})
+                else:
+                    rr = cli.read_holding_registers(start, count, unit=UNIT_ID)
+                if hasattr(rr, "isError") and rr.isError():
+                    continue
+                for i, v in enumerate(rr.registers):
+                    out[start + i] = int(v)
+            except Exception:
+                continue
+        return out or None
+    except Exception:
+        return None
+    finally:
+        with contextlib.suppress(Exception):
+            if cli is not None:
+                cli.close()
+
+
 def _read_regs_pymodbus() -> Optional[Dict[str, Any]]:
     """pymodbus read path, version-agnostic (2.x `method=`/`unit=` vs 3.x `slave=`)."""
     global LAST_ERR

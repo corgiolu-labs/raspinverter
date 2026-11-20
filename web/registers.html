@@ -1,0 +1,90 @@
+{% extends "_base.html" %}
+{% block title %}Registri inverter · Inverter{% endblock %}
+{% block brand %}📟 Registri inverter{% endblock %}
+{% block banner %}{% endblock %}
+{% block head_extra %}
+{% raw %}
+<style>
+  .rg-intro { color:var(--muted); font-size:.88rem; margin:0 0 12px; line-height:1.45; }
+  .rg-grid { display:grid; gap:12px; grid-template-columns:repeat(auto-fit,minmax(340px,1fr)); }
+  .rg-row { display:grid; grid-template-columns:2.6em 1fr auto; column-gap:10px; row-gap:2px; padding:9px 0; border-bottom:1px solid rgba(255,255,255,.06); }
+  .rg-row:last-child { border-bottom:0; }
+  .rg-addr { color:var(--muted); font-size:.82rem; font-variant-numeric:tabular-nums; padding-top:1px; }
+  .rg-name { font-weight:600; font-size:.92rem; }
+  .rg-val { font-weight:700; text-align:right; font-variant-numeric:tabular-nums; font-size:.92rem; max-width:55vw; }
+  .rg-desc, .rg-note { grid-column:2 / 4; font-size:.8rem; line-height:1.4; }
+  .rg-desc { color:var(--muted); }
+  .rg-note { color:#f59e0b; margin-top:2px; }
+  .tag-ded { display:inline-block; margin-left:6px; padding:0 6px; border-radius:999px; font-size:.68rem; background:rgba(148,163,184,.2); color:#cbd5e1; font-weight:500; vertical-align:1px; }
+  .warn-val { color:#f59e0b; }
+  .rg-meta { color:var(--muted); font-size:.8rem; margin-top:10px; }
+  details.rg-unknown summary { cursor:pointer; color:var(--muted); font-size:.88rem; }
+  .rg-unk { display:grid; grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); gap:4px 16px; margin-top:8px; font-size:.82rem; font-variant-numeric:tabular-nums; }
+  .rg-unk span b { color:var(--muted); font-weight:400; display:inline-block; min-width:2.8em; }
+  @media (max-width:420px) { .rg-grid { grid-template-columns:1fr; } }
+</style>
+{% endraw %}
+{% endblock %}
+{% block footer %}Registri Modbus dell'inverter EASUN SMG-II · solo lettura{% endblock %}
+{% block content %}
+<p class="rg-intro">Valori letti direttamente dall'inverter sul bus Modbus, con la spiegazione di cosa misurano o regolano. È una pagina di <b>sola lettura</b>: da qui non si modifica nessuna impostazione. Le voci marcate <span class="tag-ded">dedotto</span> non sono nella documentazione e il loro significato va confermato.</p>
+<div class="rg-grid" id="rgGrid"><div class="card"><p class="rg-intro">Lettura dei registri in corso…</p></div></div>
+<div class="card" style="margin-top:12px">
+  <details class="rg-unknown">
+    <summary>Registri senza documentazione (<span id="rgUnkCount">0</span>)</summary>
+    <p class="rg-intro" style="margin-top:8px">Contengono un valore ma non compaiono in nessuna mappa pubblica: li mostro grezzi, senza attribuire un significato.</p>
+    <div class="rg-unk" id="rgUnknown"></div>
+  </details>
+  <div class="rg-meta" id="rgMeta"></div>
+</div>
+{% endblock %}
+{% block scripts %}
+{% raw %}
+<script>
+(function () {
+  var $ = function (id) { return document.getElementById(id); };
+  function el(tag, cls, text) { var e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; }
+
+  function render(d) {
+    var grid = $('rgGrid'); grid.textContent = '';
+    (d.groups || []).forEach(function (g) {
+      var rows = (d.items || []).filter(function (i) { return i.group === g.key; });
+      if (!rows.length) return;
+      var card = el('div', 'card'); card.appendChild(el('h3', null, g.label));
+      rows.forEach(function (i) {
+        var row = el('div', 'rg-row');
+        row.appendChild(el('div', 'rg-addr', String(i.addr)));
+        var name = el('div', 'rg-name', i.label);
+        if (i.fonte === 'dedotto') name.appendChild(el('span', 'tag-ded', 'dedotto'));
+        row.appendChild(name);
+        var v = el('div', 'rg-val', i.text);
+        if ((i.key === 'warnings' || i.key === 'faults') && i.active && i.active.length) v.className += ' warn-val';
+        row.appendChild(v);
+        row.appendChild(el('div', 'rg-desc', i.desc));
+        if (i.nota) row.appendChild(el('div', 'rg-note', '⚠ ' + i.nota));
+        card.appendChild(row);
+      });
+      grid.appendChild(card);
+    });
+    var ub = $('rgUnknown'); ub.textContent = '';
+    (d.unknown || []).forEach(function (u) {
+      var s = el('span'); s.appendChild(el('b', null, String(u.addr)));
+      s.appendChild(document.createTextNode(u.signed !== u.raw ? u.raw + ' (' + u.signed + ')' : String(u.raw)));
+      ub.appendChild(s);
+    });
+    $('rgUnkCount').textContent = (d.unknown || []).length;
+    $('rgMeta').textContent = 'Letti ' + d.count + ' registri alle ' + String(d.read_at).slice(11, 19) + '. I valori si aggiornano ogni 30 secondi.';
+  }
+  function load() {
+    fetch('/api/registers', { cache: 'no-store' }).then(function (r) { return r.json(); }).then(function (d) {
+      if (d && d.ok) render(d); else $('rgMeta').textContent = 'L\'inverter non ha risposto: ' + ((d && d.error) || 'errore sconosciuto');
+    }).catch(function () { /* offline: resta l'ultima lettura */ });
+  }
+  load();
+  setInterval(load, 30000);
+  var rb = $('btnRefresh'); if (rb) rb.addEventListener('click', load);
+})();
+</script>
+{% endraw %}
+<script src="/status.mod.js?v=20261108"></script>
+{% endblock %}

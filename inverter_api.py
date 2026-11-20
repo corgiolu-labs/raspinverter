@@ -40,7 +40,9 @@ from hardware import (
     relay_forced, relay_force_step,
     _gpio_setup_output, _gpio_write, _gpio_read, _gpio_cleanup, GPIO_BACKEND,
     balance_setup, balance_set, balance_manual, balance_step, balance_status,
+    read_holding_blocks, write_holding_fc16,
 )
+import inverter_registers
 import statistics
 from string_watch import StringWatch, CHANNELS as STRING_CHANNELS, CLIP_MV
 
@@ -369,6 +371,121 @@ def grid_home_page():
 @app.route("/history")
 def history_page():
     return render_template("history.html")
+
+@app.route("/registri")
+def registers_page():
+    return render_template("registers.html")
+
+_REG_CACHE = {"t": 0.0, "data": None}
+
+@app.route("/api/registers")
+def registers_api():
+    """Registri dell'inverter decodificati (sola lettura). Cache di 30 s per non affollare il bus."""
+    now = time.monotonic()
+    if _REG_CACHE["data"] is not None and now - _REG_CACHE["t"] < 30:
+        return jsonify(_REG_CACHE["data"])
+    with _lock:   # il bus e' condiviso con il poll
+        raw = read_holding_blocks(inverter_registers.BLOCKS)
+    if not raw:
+        return jsonify({"ok": False, "error": "l'inverter non risponde sul bus Modbus"}), 503
+    data = inverter_registers.describe(raw)
+    data.update({"ok": True, "read_at": now_str(), "count": len(raw)})
+    _REG_CACHE.update({"t": now, "data": data})
+    return jsonify(data)
+
+@app.route("/imposta-inverter")
+def inverter_settings_page():
+    return render_template("inverter_settings.html")
+
+_WRITE_ARM = {"until": 0.0}
+WRITE_LOG = DATA_DIR / "inverter_writes.log"
+
+def _write_armed_left() -> float:
+    return max(0.0, _WRITE_ARM["until"] - time.monotonic())
+
+def _write_log_tail(n=10):
+    try:
+        return WRITE_LOG.read_text(encoding="utf-8").strip().splitlines()[-n:][::-1]
+    except Exception:
+        return []
+
+@app.route("/api/inverter-settings", methods=["GET", "POST"])
+def inverter_settings_api():
+    """GET: impostazioni scrivibili con il valore attuale. POST {addr, value, expect_raw}: scrive.
+    Scrive solo se la scrittura e' abilitata a tempo, l'indirizzo e' nella lista sicura, il valore
+    rispetta limiti, passo e vincoli tra le tensioni, e il valore attuale e' quello che l'utente
+    vedeva. Dopo la scrittura rilegge e registra tutto in data/inverter_writes.log."""
+    if request.method == "GET":
+        with _lock:
+            raw = read_holding_blocks(inverter_registers.SETTINGS_BLOCKS)
+        if not raw:
+            return jsonify({"ok": False, "error": "l'inverter non risponde sul bus Modbus"}), 503
+        items = []
+        for w in inverter_registers.WRITABLE:
+            cur = raw.get(w["addr"])
+            item = {k: v for k, v in w.items() if k != "enum"}
+            if w.get("enum") is not None:
+                item["options"] = [{"value": k, "label": l} for k, l in w["enum"].items()]
+            item.update({"raw": cur, "value": None if cur is None else inverter_registers.from_raw(w, cur)})
+            items.append(item)
+        return jsonify({"ok": True, "armed_left_s": round(_write_armed_left()), "items": items,
+                        "warnings": inverter_registers.cross_check(raw), "log": _write_log_tail()})
+
+    body = request.get_json(silent=True) or {}
+    if not _write_armed_left():
+        return jsonify({"ok": False, "error": "scrittura non abilitata: abilitala dalla pagina"}), 403
+    try:
+        addr = int(body.get("addr"))
+        spec = inverter_registers.WRITABLE_BY_ADDR[addr]
+    except Exception:
+        return jsonify({"ok": False, "error": "registro non scrivibile da qui"}), 400
+    try:
+        new_raw = inverter_registers.to_raw(spec, body.get("value"))
+    except (TypeError, ValueError) as e:
+        return jsonify({"ok": False, "error": str(e)}), 400
+    who = request.headers.get("X-Forwarded-For") or request.remote_addr
+    with _lock:   # lettura di controllo, scrittura e rilettura senza che il poll si inserisca
+        raw = read_holding_blocks(inverter_registers.SETTINGS_BLOCKS)
+        if not raw or raw.get(addr) is None:
+            return jsonify({"ok": False, "error": "impossibile leggere il valore attuale"}), 503
+        old_raw = raw[addr]
+        if body.get("expect_raw") is not None and int(body["expect_raw"]) != old_raw:
+            return jsonify({"ok": False, "error": "il valore sull'inverter è cambiato nel frattempo: ricarica la pagina"}), 409
+        if new_raw == old_raw:
+            return jsonify({"ok": True, "noop": True, "message": "valore già impostato, nessuna scrittura"})
+        merged = dict(raw); merged[addr] = new_raw
+        # Blocca solo i problemi che la modifica introduce: una situazione gia' fuori regola
+        # (oggi lo spegnimento a 44,0 V) non deve impedire le altre modifiche, ne' la sua correzione.
+        before = set(inverter_registers.cross_check(raw))
+        errs = [e for e in inverter_registers.cross_check(merged) if e not in before]
+        if errs:
+            return jsonify({"ok": False, "error": "; ".join(errs)}), 400
+        ok, msg = write_holding_fc16(addr, new_raw)
+        time.sleep(0.4)
+        after = read_holding_blocks(((addr, 1),)) or {}
+    readback = after.get(addr)
+    success = ok and readback == new_raw
+    line = "%s  %s (%d): %s -> %s  %s  rilettura=%s  da %s" % (
+        now_str(), spec["label"], addr, inverter_registers.from_raw(spec, old_raw), inverter_registers.from_raw(spec, new_raw),
+        "OK" if success else "FALLITA: " + msg, readback, who)
+    print("[inverter-write] " + line, flush=True)
+    try:
+        with open(WRITE_LOG, "a", encoding="utf-8") as f:
+            f.write(line + "\n")
+    except Exception:
+        pass
+    _REG_CACHE["data"] = None
+    if not success:
+        return jsonify({"ok": False, "error": msg if not ok else "scritto ma la rilettura dà %s" % readback}), 502
+    return jsonify({"ok": True, "old": inverter_registers.from_raw(spec, old_raw), "new": inverter_registers.from_raw(spec, new_raw)})
+
+@app.route("/api/inverter-settings/arm", methods=["POST"])
+def inverter_settings_arm():
+    """Abilita la scrittura per 10 minuti, o la disabilita subito con {"off": true}."""
+    body = request.get_json(silent=True) or {}
+    _WRITE_ARM["until"] = 0.0 if body.get("off") else time.monotonic() + 600
+    print("[inverter-write] scrittura %s" % ("disabilitata" if body.get("off") else "abilitata per 10 minuti"), flush=True)
+    return jsonify({"ok": True, "armed_left_s": round(_write_armed_left())})
 
 @app.route("/diagnostics")
 def diagnostics_page():
