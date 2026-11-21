@@ -112,18 +112,33 @@ if ('serviceWorker' in navigator) {
   
   // Ottimizzazione chart SOC con singleton pattern
   let socChart = null;
-  function setSOC(p){
+  // Ciambella: verde = energia usabile prima che si agganci l'ENEL, grigio = riserva sotto la
+  // soglia ENEL (non si usa), vuoto = parte scarica. La percentuale e' quella usabile.
+  function setSOC(d){
+    var cap = Number(d.cap_wh), hasU = isFinite(cap) && cap > 0 && d.usable_wh != null;
+    var p = hasU ? Number(d.usable_pct) : Number(d.soc_pct);
     var el=getElement('soc_label'); if(el) el.textContent = p.toFixed(1) + '%';
+    var seg = hasU ? [100 * d.usable_wh / cap, 100 * d.reserve_left_wh / cap] : [p, 0];
+    seg.push(Math.max(0, 100 - seg[0] - seg[1]));
     var ctxEl=getElement('batteryDonut');
+    if (ctxEl) {
+      ctxEl.title = hasU ? (fmt(d.usable_wh/1000,1) + ' kWh usabili prima dell\'ENEL (' + p.toFixed(0) + '%) · riserva sotto la soglia ENEL ' + fmt(d.reserve_wh/1000,1) + ' kWh, non conteggiata') : '';
+      ctxEl.setAttribute('aria-label', ctxEl.title || 'SOC batteria');
+    }
     if (window.Chart && ctxEl){
       if (!socChart){
         socChart = new Chart(ctxEl.getContext('2d'), {
           type:'doughnut',
-          data:{ labels:['SOC','Scarica'], datasets:[{ data:[p,100-p], backgroundColor:[Theme.colors.batt,'rgba(255,255,255,.08)'] }] },
-          options:{ plugins:{legend:{display:false}}, cutout:'65%' }
+          data:{ labels:['Usabile','Riserva','Scarica'], datasets:[{ data:seg, backgroundColor:[Theme.colors.batt,'rgba(148,163,184,.55)','rgba(255,255,255,.08)'], borderWidth:0 }] },
+          options:{ plugins:{legend:{display:false}, tooltip:{callbacks:{label:function(i){
+            var wh = [d.usable_wh, d.reserve_left_wh][i.dataIndex];
+            return i.dataIndex === 2 ? '' : i.label + ': ' + fmt((wh||0)/1000,1) + ' kWh'; }}}}, cutout:'65%' }
         });
       } else {
-        socChart.data.datasets[0].data = [p,100-p];
+        socChart.data.datasets[0].data = seg;
+        socChart.options.plugins.tooltip.callbacks.label = function(i){
+          var wh = [d.usable_wh, d.reserve_left_wh][i.dataIndex];
+          return i.dataIndex === 2 ? '' : i.label + ': ' + fmt((wh||0)/1000,1) + ' kWh'; };
         socChart.update('none'); // Disabilita animazioni per performance
       }
     }
@@ -200,7 +215,7 @@ if ('serviceWorker' in navigator) {
     updates.push(() => setText('load_percent', fmt(d.load_percent,0)));
     
     // SOC
-    updates.push(() => { if (d.soc_pct != null && isFinite(Number(d.soc_pct))) setSOC(Number(d.soc_pct)); });
+    updates.push(() => { if (d.soc_pct != null && isFinite(Number(d.soc_pct))) setSOC(d); });
     
     // I2C / ADC
     updates.push(() => {

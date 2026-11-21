@@ -146,7 +146,7 @@
 </section>
 {% endblock %}
 {% block scripts %}
-<script src="/app.mod.js?v=20261108b"></script>
+<script src="/app.mod.js?v=20261121"></script>
 {% raw %}
 <script>
 (function () {
@@ -158,10 +158,12 @@
   var balBusy = false;
 
   function render(d) {
-    $('soc').textContent = n(d.soc_pct, 1, ' %');
+    $('soc').textContent = d.usable_pct != null ? n(d.usable_pct, 1, ' %') : n(d.soc_pct, 1, ' %');
     $('volt').textContent = n(d.battery_v, 1, ' V');
     $('amp').textContent = sign(d.battery_a, 1, ' A');
-    $('capNote').textContent = 'Capacità impostata ' + n(d.nominal_ah, 0, ' Ah') + ' · energia contata ' + kwh(d.net_wh) + ' kWh · ultima ricalibrazione al pieno: ' + (d.last_full ? d.last_full.slice(8, 10) + '/' + d.last_full.slice(5, 7) + ' ' + d.last_full.slice(11, 16) : 'mai');
+    var dt = function (s) { return s ? s.slice(8, 10) + '/' + s.slice(5, 7) + ' ' + s.slice(11, 16) : 'mai'; };
+    $('capNote').textContent = 'Usabili prima dell\'ENEL ' + kwh(d.usable_wh) + ' kWh (la percentuale è su questa parte) · riserva sotto la soglia ENEL ' + kwh(d.reserve_wh) + ' kWh, non conteggiata · energia totale contata ' + kwh(d.net_wh) + ' kWh su ' + n(d.nominal_ah, 0, ' Ah') +
+      ' · ultimo riallineamento all\'aggancio ENEL: ' + dt(d.last_anchor) + ' · ultima ricalibrazione al pieno: ' + dt(d.last_full);
 
     var b = d.balance || {};
     $('b1').textContent = n(b.serie1_v, 2, ' V');

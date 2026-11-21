@@ -277,6 +277,73 @@ def set_battery_full(reason="full_charge"):
         return cursor.lastrowid
 
 
+def battery_reserve_wh() -> float:
+    """Energia stimata ancora nel pacco quando l'ENEL si aggancia (relay.on_v, carico leggero).
+    battery.soc.enel_anchor.reserve_wh, default 1000 Wh: a 48 V una LiFePO4 16S e' al 5-10%."""
+    try:
+        return max(0.0, float(_get("battery.soc.enel_anchor.reserve_wh", 1000.0)))
+    except Exception:
+        return 1000.0
+
+
+def set_battery_reserve(net_wh: float, reason: str):
+    """Riallinea il contatore a net_wh (nuova riga, come set_battery_full)."""
+    now = now_str()
+    with db() as con:
+        con.execute("""
+            UPDATE battery_counters SET reset_reason = ?
+            WHERE counter_type = 'daily_net' AND reset_reason IS NULL
+        """, (reason,))
+        cursor = con.execute("""
+            INSERT INTO battery_counters
+            (counter_type, start_timestamp, start_battery_v, total_batt_in_Wh, total_batt_out_Wh, total_batt_net_Wh, reset_reason, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """, ('daily_net', now, 0.0, 0.0, 0.0, float(net_wh), None, now))
+        con.commit()
+        print(f"[battery] Riallineamento: net={net_wh:.0f} Wh ({reason})", flush=True)
+        return cursor.lastrowid
+
+
+_last_enel_anchor = None
+
+def check_battery_enel_anchor(battery_v, charge_a):
+    """Punto fisso del conteggio: quando la batteria scende alla soglia di aggancio ENEL
+    (relay.on_v) scaricandosi con poca corrente, il contatore torna alla riserva stimata.
+    Serve perche' con l'ENEL a 48 V la batteria non arriva piu' a net_reset_voltage (46 V)
+    e d'inverno non arriva al pieno: senza un punto fisso il conteggio va alla deriva.
+    Al massimo una volta ogni battery.soc.enel_anchor.cooldown_h ore (default 6)."""
+    global _last_enel_anchor
+    if battery_v is None or charge_a is None:
+        return False
+    if not _bool(_get("battery.soc.enel_anchor.enabled", True)):
+        return False
+    try:
+        on_v = float(_get("relay.on_v", 48.0))
+        max_a = float(_get("battery.soc.enel_anchor.max_discharge_a", 20.0))
+        cooldown = float(_get("battery.soc.enel_anchor.cooldown_h", 6.0)) * 3600.0
+    except Exception:
+        on_v, max_a, cooldown = 48.0, 20.0, 21600.0
+    v, a = float(battery_v), float(charge_a)
+    # in scarica, ma leggera: sotto carico forte la tensione cala prima e il punto non vale
+    if not (v <= on_v and -max_a <= a < 0):
+        return False
+    now = datetime.now()
+    if _last_enel_anchor is not None and (now - _last_enel_anchor).total_seconds() < cooldown:
+        return False
+    with db() as con:
+        row = con.execute("""
+            SELECT start_timestamp FROM battery_counters WHERE counter_type = 'daily_net'
+            ORDER BY id DESC LIMIT 1
+        """).fetchone()
+    last_dt = parse_ts(row['start_timestamp']) if row else None
+    if last_dt and (now - last_dt).total_seconds() < cooldown:
+        _last_enel_anchor = last_dt
+        return False
+    set_battery_reserve(battery_reserve_wh(), f"enel_anchor_{v:.1f}V_{a:.1f}A")
+    _last_enel_anchor = now
+    return True
+
+
 def update_battery_counter(charge_a, battery_v):
     """Conteggio COULOMB (Ah) sulla corrente Hall tarata.
     charge_a = corrente di carica dai sensori Hall (A): >0 carica, <0 scarica.

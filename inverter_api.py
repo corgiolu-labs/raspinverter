@@ -32,6 +32,7 @@ from database import (
     db, db_init,
     _db_files_size_bytes, _archive_compute_and_apply,
     get_current_battery_counter, reset_battery_counter, set_battery_full,
+    check_battery_enel_anchor, battery_reserve_wh,
     update_battery_counter, check_battery_reset_condition, check_battery_full_condition,
 )
 from hardware import (
@@ -239,6 +240,8 @@ def poll_loop():
                         # Controlla se e' necessario azzerare il contatore
                         if check_battery_reset_condition(battery_v, charge_a):
                             pass  # Reset automatico silenzioso
+                        # Punto fisso alla soglia di aggancio ENEL (vedi check_battery_enel_anchor)
+                        check_battery_enel_anchor(battery_v, charge_a)
                         
                         # Aggiorna sempre il contatore corrente (conteggio Ah sulla corrente Hall)
                         update_battery_counter(charge_a, battery_v)
@@ -601,6 +604,16 @@ def battery_history():
         "start_diff_v": float(_get("balance.start_diff_v", 0.3)), "stop_diff_v": float(_get("balance.stop_diff_v", 0.15)),
     })
 
+def _usable(net_wh, cap_wh):
+    """Energia usabile prima dell'aggancio ENEL: lo zero e' la riserva stimata a relay.on_v."""
+    res = battery_reserve_wh()
+    if net_wh is None or cap_wh <= res:
+        return {"reserve_wh": res}
+    usable = max(0.0, float(net_wh) - res)
+    return {"reserve_wh": round(res), "cap_wh": round(cap_wh), "usable_wh": round(usable),
+            "usable_pct": round(min(100.0, 100.0 * usable / (cap_wh - res)), 1),
+            "reserve_left_wh": round(max(0.0, min(float(net_wh), res)))}
+
 @app.route("/api/battery-status")
 def battery_status_api():
     """Dati della scheda Batteria: solo valori misurati."""
@@ -612,6 +625,11 @@ def battery_status_api():
             SELECT b.start_timestamp FROM battery_counters a
             JOIN battery_counters b ON b.id = (SELECT MIN(id) FROM battery_counters WHERE id > a.id)
             WHERE a.reset_reason LIKE '%full%' ORDER BY b.id DESC LIMIT 1
+        """).fetchone()
+        anchor = con.execute("""
+            SELECT b.start_timestamp FROM battery_counters a
+            JOIN battery_counters b ON b.id = (SELECT MIN(id) FROM battery_counters WHERE id > a.id)
+            WHERE a.reset_reason LIKE 'enel_anchor%' OR a.reset_reason LIKE 'correzione%' ORDER BY b.id DESC LIMIT 1
         """).fetchone()
         daily = [dict(r) for r in con.execute(
             "SELECT day, pv_Wh, load_Wh, grid_Wh, batt_in_Wh, batt_out_Wh FROM archive ORDER BY day DESC LIMIT 14")]
@@ -640,9 +658,9 @@ def battery_status_api():
 
     live = _last if isinstance(_last, dict) else {}
     return jsonify({
-        "ok": True, "soc_pct": soc, "net_wh": net_wh, "nominal_ah": nominal_ah,
+        "ok": True, "soc_pct": soc, "net_wh": net_wh, "nominal_ah": nominal_ah, **_usable(net_wh, cap_wh),
         "battery_v": live.get("battery_v"), "battery_a": live.get("battery_a"),
-        "last_full": full[0] if full else None,
+        "last_full": full[0] if full else None, "last_anchor": anchor[0] if anchor else None,
         "balance": balance_status(LAST_I2C), "channels": channels,
         "measured": {"bk1": bk1, "bk2": bk2, "total_bk1": total1, "total_bk2": total2, "weakest": weakest,
                      "pack_ah": min(total1, total2) if (total1 and total2) else None},
@@ -965,6 +983,7 @@ def inverter():
             cap_wh = float(_get("battery.nominal_ah", 500)) * float(_get("battery.nominal_voltage", 51.2))
             if cap_wh > 0:
                 s["soc_pct"] = round(max(0.0, min(100.0, 100.0 * s["battery_net_wh"] / cap_wh)), 1)
+                s.update(_usable(s["battery_net_wh"], cap_wh))
         else:
             vmax = float(_get("battery.soc.vmax_v", 58.0))
             vmin = float(_get("battery.soc.vmin_v", 44.0))
