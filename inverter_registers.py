@@ -27,8 +27,12 @@ GROUPS = (
 )
 
 WORK_MODE = {0: "Accensione", 1: "Standby", 2: "Da rete", 3: "Off-grid (a batteria)", 4: "Bypass", 5: "In carica", 6: "Guasto"}
-OUTPUT_PRIORITY = {0: "UTI: rete, poi solare, poi batteria", 1: "SOL: solare, poi rete, poi batteria",
-                   2: "SBU: solare, poi batteria, poi rete", 3: "SUB: solare, poi rete, poi batteria"}
+# SOL e SUB nei manuali hanno descrizioni quasi identiche (solare, poi rete; batteria solo se manca
+# la rete): le fonti non concordano sulla differenza, quindi qui non se ne inventa una.
+OUTPUT_PRIORITY = {0: "UTI: prima la rete; solare e batteria solo se la rete manca",
+                   1: "SOL: prima il solare, poi la rete; batteria solo se la rete manca",
+                   2: "SBU: prima il solare, poi la batteria; rete solo a batteria scarica",
+                   3: "SUB: prima il solare, poi la rete; batteria solo se la rete manca (quasi uguale a SOL)"}
 CHARGE_PRIORITY = {0: "Priorità alla rete", 1: "Priorità al solare", 2: "Solare e rete insieme", 3: "Solo solare"}
 ON_OFF = {0: "Disattivato", 1: "Attivo"}
 
