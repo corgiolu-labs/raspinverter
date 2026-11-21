@@ -605,7 +605,26 @@ RELAY_LAST_TOGGLE: float = 0.0
 # Fail-safe ENEL: istante dell'ultima tensione batteria valida letta dall'inverter. Parte "adesso"
 # cosi' all'avvio c'e' il tempo di grazia prima che la mancanza di dati agganci la rete.
 RELAY_LAST_VALID_T: float = time.monotonic()
-RELAY_STATE_FILE = DATA_DIR / "relay_state.json"   # ultimo stato, per ripartire uguale dopo un riavvio
+RELAY_STATE_FILE = DATA_DIR / "relay_state.json"
+# Energia usabile prima dell'aggancio ENEL (Wh), aggiornata dal poll dal contatore SOC. None = ignota.
+BATT_USABLE_WH: Optional[float] = None
+
+
+def relay_release_ok(batt_v: float, off_v: float) -> bool:
+    """Si stacca l'ENEL solo con V >= off_v E almeno relay.off_min_usable_wh di energia usabile
+    (default 2000 Wh; 0 = solo tensione). Una LiFePO4 quasi vuota in carica arriva a off_v con
+    pochissima energia: senza questo controllo l'ENEL si staccava e si riagganciava dopo pochi
+    minuti, con 90 s a batteria (verifica della rete dell'inverter) a ogni riaggancio.
+    Con energia ignota (primo giro dopo un riavvio, errore del DB) resta agganciata: lato sicuro."""
+    if batt_v < off_v:
+        return False
+    try:
+        need = float(CONF.get("relay", {}).get("off_min_usable_wh", 2000))
+    except Exception:
+        need = 2000.0
+    if need <= 0:
+        return True
+    return BATT_USABLE_WH is not None and BATT_USABLE_WH >= need   # ultimo stato, per ripartire uguale dopo un riavvio
 
 
 def _relay_state_save(on: bool):
@@ -629,6 +648,7 @@ def _relay_state_load() -> bool:
 
 def relay_apply(hw_on: bool):
     """Set relay output according to active_high."""
+    print(f"[relay] -> {'ON' if hw_on else 'OFF'} (energia usabile {BATT_USABLE_WH if BATT_USABLE_WH is None else round(BATT_USABLE_WH)} Wh)", flush=True)
     global RELAY_STATE, RELAY_LAST_TOGGLE
     cfg = CONF.get("relay", {})
     pin = int(cfg.get("gpio_pin", 17))
@@ -1031,14 +1051,14 @@ def relay_auto_step(batt_v: Optional[float]):
     if cur is None:
         if batt_v <= on_v:
             want = True
-        elif batt_v >= off_v:
+        elif relay_release_ok(batt_v, off_v):
             want = False
         else:
             return
     else:
         if (not cur) and (batt_v <= on_v):
             want = True
-        elif cur and (batt_v >= off_v):
+        elif cur and relay_release_ok(batt_v, off_v):
             want = False
         else:
             want = cur
@@ -1136,7 +1156,7 @@ def grid_control_step(battery_v, i2c=None):
     s1, s2 = _bank_v_from_i2c(i2c)
     balanced = (abs(s1 - s2) <= 0.10 * ((s1 + s2) / 2.0)) if (s1 is not None and s2 is not None) else True
     want_on = (battery_v <= on_v) or want_f4               # OR -> mai dopo relay_auto_step
-    want_off = (battery_v >= off_v) and balanced and (not want_f4)
+    want_off = relay_release_ok(battery_v, off_v) and balanced and (not want_f4)
     cur = RELAY_STATE
     target = True if want_on else (False if want_off else cur)
     if target != cur and (now - RELAY_LAST_TOGGLE) >= min_gap:

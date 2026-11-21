@@ -245,6 +245,12 @@ def poll_loop():
                         
                         # Aggiorna sempre il contatore corrente (conteggio Ah sulla corrente Hall)
                         update_battery_counter(charge_a, battery_v)
+                        # energia usabile per il distacco ENEL (relay_release_ok)
+                        try:
+                            _c = get_current_battery_counter()
+                            hardware.BATT_USABLE_WH = None if not _c else max(0.0, float(_c["total_batt_net_Wh"] or 0.0) - battery_reserve_wh())
+                        except Exception:
+                            hardware.BATT_USABLE_WH = None
 
                         # Auto-calibrazione PIENO (regola fisica + plausibilita' PV/giorno)
                         full_i = charge_a
